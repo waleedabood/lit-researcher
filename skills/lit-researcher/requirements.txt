@@ -1,0 +1,7 @@
+requests
+rapidfuzz
+openpyxl
+python-docx
+pypdf
+# optional: better sentence splitting in the reference check
+pysbd

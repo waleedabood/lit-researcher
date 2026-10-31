@@ -1,0 +1,13 @@
+{
+  "name": "lit-researcher",
+  "owner": {
+    "name": "Waleed Abood, MD"
+  },
+  "description": "Lit Researcher: code-verified literature search for clinical questions.",
+  "plugins": [
+    {
+      "name": "lit-researcher",
+      "source": "./"
+    }
+  ]
+}

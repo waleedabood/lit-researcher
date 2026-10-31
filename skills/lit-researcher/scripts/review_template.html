@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a66; --line: #e2e0d9;
+    --accent: #2f5d8a; --accent-soft: #e6eef6; --mark: #fff0a8; --mark-ink: #1d1d1b;
+    --ok: #2e7d4f; --ok-soft: #e3f2e8; --part: #a8741a; --part-soft: #fbf0d9; --bad: #b3412f; --bad-soft: #f8e1dc;
+    --you: #fff9db; --sel: #eef3f8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #171716; --panel: #212120; --ink: #ecebe6; --muted: #a09e97; --line: #353431;
+      --accent: #8db7e0; --accent-soft: #1f2e3c; --mark: #5c4d12; --mark-ink: #fff6cf;
+      --ok: #7cc79a; --ok-soft: #1d3326; --part: #e2b25c; --part-soft: #3a2e17; --bad: #ef8f7d; --bad-soft: #3d221d;
+      --you: #2e2a17; --sel: #263240; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #171716; --panel: #212120; --ink: #ecebe6; --muted: #a09e97; --line: #353431;
+    --accent: #8db7e0; --accent-soft: #1f2e3c; --mark: #5c4d12; --mark-ink: #fff6cf;
+    --ok: #7cc79a; --ok-soft: #1d3326; --part: #e2b25c; --part-soft: #3a2e17; --bad: #ef8f7d; --bad-soft: #3d221d;
+    --you: #2e2a17; --sel: #263240; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+         display: flex; flex-direction: column; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button, select { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--panel); border-color: var(--accent); }
+  input[type=search] { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; min-width: 180px; }
+  .topbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .brand { font-weight: 700; margin-right: 6px; }
+  .tabs { display: flex; gap: 2px; }
+  .tabs button { border-radius: 6px; }
+  .tabs button.on, .seg button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .seg { display: inline-flex; }
+  .seg button { border-radius: 0; margin-left: -1px; }
+  .seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+  .seg button:last-child { border-radius: 0 6px 6px 0; }
+  .spacer { flex: 1; }
+  .status-line { color: var(--muted); font-size: 12px; }
+  .status-line.dirty { color: var(--part); font-weight: 600; }
+  .banner { padding: 8px 12px; background: var(--part-soft); color: var(--ink); border-bottom: 1px solid var(--line); font-size: 13px; }
+  .banner.hidden, .hidden { display: none !important; }
+  main { flex: 1; display: grid; grid-template-columns: minmax(280px, 38%) 1fr; min-height: 0; }
+  #list { overflow: auto; border-right: 1px solid var(--line); background: var(--panel); }
+  .list-head, .list-row { display: grid; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); align-items: start; }
+  .list-head { position: sticky; top: 0; background: var(--panel); font-size: 12px; color: var(--muted); font-weight: 600; z-index: 1; }
+  .list-row { cursor: pointer; scroll-margin-top: 36px; }
+  .list-row:hover { background: var(--bg); }
+  .list-row.sel { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
+  .cell { min-width: 0; }
+  .nowrap .cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .count { padding: 6px 10px; font-size: 12px; color: var(--muted); }
+  #detail { overflow: auto; padding: 18px 24px 60px; }
+  #detail h2 { margin: 0 0 4px; font-size: 18px; line-height: 1.35; }
+  .sub { color: var(--muted); margin-bottom: 14px; font-size: 13px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 16px; }
+  .pills .label { font-size: 12px; color: var(--muted); margin-right: 4px; }
+  .pill { border-radius: 999px; padding: 3px 12px; }
+  .pill.on[data-tone=none] { background: var(--line); }
+  .pill.on[data-tone=ok] { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+  .pill.on[data-tone=part] { background: var(--part-soft); border-color: var(--part); color: var(--part); }
+  .pill.on[data-tone=bad] { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+  .field { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+  .field h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+  .field .body { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .clamp .field .body { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .clamp .field.open .body { display: block; }
+  .field.mine { background: var(--you); }
+  .field textarea { width: 100%; min-height: 64px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--panel); }
+  .field.edited h3::after { content: " · edited"; color: var(--part); text-transform: none; letter-spacing: 0; }
+  mark { background: var(--mark); color: var(--mark-ink); border-radius: 2px; padding: 0 1px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--line); margin-right: 6px; vertical-align: middle; }
+  .dot[data-tone=ok] { background: var(--ok); } .dot[data-tone=part] { background: var(--part); } .dot[data-tone=bad] { background: var(--bad); }
+  .muted { color: var(--muted); }
+  .menu { position: relative; }
+  .panel { position: absolute; top: 34px; left: 0; z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+           padding: 10px 12px; width: 360px; max-height: 70vh; overflow: auto; box-shadow: 0 8px 24px rgba(0,0,0,.15); }
+  .panel table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .panel td, .panel th { padding: 3px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+  .panel th { font-size: 12px; color: var(--muted); }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+  .empty { padding: 40px; color: var(--muted); }
+  .keys { font-size: 12px; color: var(--muted); margin-top: 24px; }
+  kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; font-size: 11px; }
+  @media (max-width: 760px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 40% 60%; }
+    #list { border-right: 0; border-bottom: 1px solid var(--line); }
+    #detail { padding: 14px 16px 40px; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">Lit review <span class="muted" style="font-weight:400">· __TOPIC__</span></span>
+  <span class="tabs" id="tabs"></span>
+  <input type="search" id="search" placeholder="Search all columns  ( / )">
+  <select id="statusFilter" title="Show rows by your review status"></select>
+  <span class="menu">
+    <button id="fieldsBtn" title="Choose which columns show in the list and in the expanded view">Fields</button>
+    <div class="panel hidden" id="fieldsPanel">
+      <p class="hint">Tick what shows in the <b>list</b> (left) and the <b>expanded view</b> (right). Columns starting with "Your" are yours to edit.</p>
+      <table><thead><tr><th>Column</th><th>List</th><th>View</th></tr></thead><tbody id="fieldRows"></tbody></table>
+      <p><button id="fieldsReset">Reset to default</button></p>
+    </div>
+  </span>
+  <span class="seg"><button id="wrapOn" title="Show full text">Wrap</button><button id="wrapOff" title="One line in the list, 4 lines in the view (click to expand)">Compact</button></span>
+  <span class="seg" title="Appearance"><button id="thAuto">Auto</button><button id="thLight">Light</button><button id="thDark">Dark</button></span>
+  <span class="spacer"></span>
+  <span class="status-line" id="statusLine"></span>
+  <button id="saveXlsx" title="Save the workbook with your changes (formatting is kept)">Save Excel</button>
+  <button id="saveHtml" class="primary" title="Save this page with your changes inside it">Save as HTML</button>
+  <button id="openBtn" title="Open a lit_review.xlsx instead of the one inside this page">Open workbook…</button>
+  <button id="exportBtn" class="primary hidden" title="Download the workbook with everyone's review changes">Export Excel</button>
+  <input type="file" id="openInput" accept=".xlsx,.xlsm" class="hidden">
+</header>
+<div class="banner hidden" id="banner"></div>
+<main>
+  <aside id="list"></aside>
+  <section id="detail"><div class="empty">Loading…</div></section>
+</main>
+
+<script id="xlsx-data" type="text/plain">__XLSX_BASE64__</script>
+<script id="settings-data" type="application/json">{}</script>
+<script type="module">
+// Snapshot the page as delivered, before any rendering, so "Save as HTML" can rewrite just the data.
+const ORIGINAL = '<!doctype html>\n' + document.documentElement.outerHTML;
+
+/*__RUNTIME__*/
+
+const MODE = '__MODE__';
+const REVIEW_ID = '__REVIEW_ID__';   // artifact mode: each topic keeps its changes under reviews/<id>/edits
+const EDITS = `reviews/${REVIEW_ID}/edits`;   // "file": a page on disk that saves itself; "artifact": a claude.ai page that saves to its db
+let db = null;              // artifact mode: shared store of review changes (collection "edits")
+let saving = 0, saveError = '';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+
+const SHEETS = ['Evidence', 'Screening', 'All records', 'Search log', 'Protocol', 'References'];
+const DEFAULTS = {
+  'Evidence': { list: ['E#', 'Paper', 'Your verdict'], view: ['Paper', 'LLM fact', 'Evidence sentence', 'Abstract'] },
+  'Screening': { list: ['Rank', 'Title', 'Your decision'], view: ['Title', 'Year', 'Journal', 'Type', 'LLM decision', 'LLM reason', 'LLM note', 'Abstract'] },
+  'All records': { list: ['Rank', 'Title', 'Status'], view: ['Title', 'First author', 'Year', 'Journal', 'Type', 'Found by', 'DOI', 'Status'] },
+};
+const TONES = { 'Accepted': 'ok', 'Include': 'ok', 'Screen it': 'ok', 'Partly correct': 'part', 'Maybe': 'part', 'Rejected': 'bad', 'Exclude': 'bad' };
+
+let wb, fileName = 'lit_review.xlsx', dataKey = '';
+let data = {};            // sheet name -> { path, headers, records }
+let cur = 'Evidence', selRow = null;
+let edits = new Map();    // "sheet|row|col" -> text
+let settings = { ...JSON.parse($('settings-data').textContent || '{}'), ...store.get('litreview:settings', {}) };
+
+function b64ToBytes(b64) {
+  const bin = atob(b64.trim());
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function bytesToB64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+async function loadBytes(bytes, name) {
+  wb = await Workbook.load(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  fileName = name;
+  let h = 2166136261;
+  for (let i = 0; i < bytes.length; i++) h = Math.imul(h ^ bytes[i], 16777619);
+  dataKey = 'litreview:edits:' + bytes.length + ':' + (h >>> 0).toString(36);
+  data = {};
+  for (const s of wb.sheets) if (!s.hidden) data[s.name] = { path: s.path, ...wb.readSheet(s.path, 1) };
+  if (!data[cur]) cur = Object.keys(data)[0];
+  edits = new Map();
+  const saved = MODE === 'file' ? store.get(dataKey, null) : null;
+  if (saved && saved.length) {
+    for (const [k, v] of saved) applyEdit(k, v, false);
+    showBanner(`Restored ${saved.length} change${saved.length > 1 ? 's' : ''} from this browser that were not saved into this page yet.`);
+  }
+  selRow = null;
+  renderAll();
+}
+
+function applyEdit(key, text, persist = true) {
+  const [sheet, row, col] = key.split('|');
+  const d = data[sheet];
+  if (!d) return;
+  const rec = d.records.find((r) => r.rowNumber === Number(row));
+  if (!rec) return;
+  rec.values[col] = text;
+  wb.setCell(d.path, Number(row), col, text);
+  edits.set(key, text);
+  if (persist && MODE === 'artifact' && db) saveToDb(sheet, Number(row), col, text);
+  else if (persist) store.set(dataKey, [...edits]);
+  updateStatus();
+}
+
+// One document per edited cell, so Claude can read the review back (ArtifactData list "edits").
+const docId = (sheet, row, col) => `${sheet.replace(/[^A-Za-z0-9]+/g, '_')}-${row}-${col}`;
+async function saveToDb(sheet, row, col, value) {
+  saving++; saveError = ''; updateStatus();
+  try { await db.collection(EDITS).doc(docId(sheet, row, col)).set({ sheet, row, col, value, at: new Date().toISOString() }); }
+  catch (e) { saveError = e.code === 'permission_denied' || e.code === 'not_granted' ? 'You can view but not change this review' : 'Not saved: ' + (e.message || e.code); }
+  saving--; updateStatus();
+}
+async function connectDb() {
+  db = window.claude?.use ? await window.claude.use('db') : null;
+  if (!db) { saveError = 'Changes are kept in this browser only (sign in to claude.ai to save them)'; updateStatus(); return; }
+  db.collection(EDITS).onSnapshot((snap) => {
+    for (const doc of snap.docs) {
+      const x = doc.data();
+      if (!x || !data[x.sheet]) continue;
+      const key = `${x.sheet}|${x.row}|${x.col}`;
+      if (edits.get(key) !== x.value) applyEdit(key, String(x.value ?? ''), false);
+    }
+    renderList(); renderDetail();
+  }, (e) => { saveError = 'Lost connection to saved changes: ' + (e.message || e.code); updateStatus(); });
+}
+
+/* ---------------------------------------------------------------- columns */
+
+const headerByName = (d, name) => d.headers.find((h) => h.name === name || h.name.startsWith(name));
+const isMine = (h) => /^Your\b/.test(h.name);
+function statusHeader(d) { return d.headers.find((h) => isMine(h) && h.options && h.options.length); }
+function sheetSettings(name) {
+  const d = data[name];
+  if (!settings[name]) {
+    const def = DEFAULTS[name];
+    const pick = (names) => names.map((n) => headerByName(d, n)).filter(Boolean).map((h) => h.name);
+    settings[name] = def
+      ? { list: pick(def.list), view: pick(def.view), wrap: true }
+      : { list: d.headers.slice(0, 2).map((h) => h.name), view: d.headers.map((h) => h.name), wrap: true };
+  }
+  return settings[name];
+}
+function saveSettings() { store.set('litreview:settings', settings); }
+
+/* ---------------------------------------------------------------- rendering */
+
+function renderAll() {
+  renderTabs();
+  renderStatusFilter();
+  renderList();
+  renderDetail();
+  renderFieldsPanel();
+  updateStatus();
+  const s = sheetSettings(cur);
+  $('wrapOn').classList.toggle('on', s.wrap);
+  $('wrapOff').classList.toggle('on', !s.wrap);
+}
+
+function renderTabs() {
+  const names = Object.keys(data).sort((a, b) => (SHEETS.indexOf(a) + 99 * (SHEETS.indexOf(a) < 0)) - (SHEETS.indexOf(b) + 99 * (SHEETS.indexOf(b) < 0)));
+  $('tabs').innerHTML = names.map((n) => `<button data-sheet="${esc(n)}" class="${n === cur ? 'on' : ''}">${esc(n)}</button>`).join('');
+}
+
+function renderStatusFilter() {
+  const sh = statusHeader(data[cur]);
+  const sel = $('statusFilter');
+  if (!sh) { sel.classList.add('hidden'); sel.value = ''; return; }
+  const prev = sel.value;
+  sel.classList.remove('hidden');
+  sel.innerHTML = `<option value="">All rows</option><option value="__none">Not reviewed</option>` +
+    sh.options.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join('');
+  sel.value = [...sel.options].some((o) => o.value === prev) ? prev : '';
+}
+
+function visibleRecords() {
+  const d = data[cur];
+  const q = $('search').value.trim().toLowerCase();
+  const sh = statusHeader(d);
+  const f = $('statusFilter').value;
+  return d.records.filter((r) => {
+    if (q && !Object.values(r.values).some((v) => String(v).toLowerCase().includes(q))) return false;
+    if (sh && f) {
+      const v = r.values[sh.col] || '';
+      if (f === '__none' ? v !== '' : v !== f) return false;
+    }
+    return true;
+  });
+}
+
+function renderList() {
+  const d = data[cur], s = sheetSettings(cur);
+  const cols = s.list.map((n) => d.headers.find((h) => h.name === n)).filter(Boolean);
+  const sh = statusHeader(d);
+  const rows = visibleRecords();
+  if (!rows.some((r) => r.rowNumber === selRow)) selRow = rows.length ? rows[0].rowNumber : null;
+  const tpl = cols.map((h) => (/^(E#|Rank|Year)$/.test(h.name) ? '52px' : isMine(h) ? '110px' : 'minmax(0,1fr)')).join(' ');
+  const head = `<div class="list-head" style="grid-template-columns:${tpl}">${cols.map((h) => `<div class="cell">${esc(h.name)}</div>`).join('')}</div>`;
+  const body = rows.map((r) => {
+    const tone = sh ? (TONES[r.values[sh.col]] || 'none') : null;
+    const cells = cols.map((h, i) => {
+      const v = r.values[h.col] || '';
+      const dot = i === 0 && sh ? `<span class="dot" data-tone="${tone}"></span>` : '';
+      return `<div class="cell">${dot}${v ? esc(v) : (isMine(h) ? '<span class="muted">–</span>' : '')}</div>`;
+    }).join('');
+    return `<div class="list-row ${r.rowNumber === selRow ? 'sel' : ''}" data-row="${r.rowNumber}" style="grid-template-columns:${tpl}">${cells}</div>`;
+  }).join('');
+  const reviewed = sh ? d.records.filter((r) => r.values[sh.col]).length : null;
+  $('list').className = s.wrap ? '' : 'nowrap';
+  $('list').innerHTML = head + body +
+    `<div class="count">${rows.length} of ${d.records.length} rows${sh ? ` · ${reviewed} reviewed` : ''}</div>`;
+  $('list').querySelector('.list-row.sel')?.scrollIntoView({ block: 'nearest' });
+}
+
+// Mark the evidence sentence inside the abstract, matching on letters and digits only.
+function highlight(text, needle) {
+  if (!needle) return esc(text);
+  const norm = (s) => { const chars = [], map = []; for (let i = 0; i < s.length; i++) { const c = s[i].toLowerCase(); if (/[a-z0-9]/.test(c)) { chars.push(c); map.push(i); } } return [chars.join(''), map]; };
+  const [t, map] = norm(text), [n] = norm(needle);
+  if (n.length < 20) return esc(text);
+  let at = t.indexOf(n), len = n.length;
+  if (at < 0) { at = t.indexOf(n.slice(0, 60)); }
+  if (at < 0) return esc(text);
+  const a = map[at], b = map[Math.min(at + len, map.length) - 1] + 1;
+  return esc(text.slice(0, a)) + '<mark>' + esc(text.slice(a, b)) + '</mark>' + esc(text.slice(b));
+}
+
+function renderDetail() {
+  const d = data[cur], s = sheetSettings(cur);
+  const rec = d.records.find((r) => r.rowNumber === selRow);
+  const el = $('detail');
+  el.className = s.wrap ? '' : 'clamp';
+  if (!rec) { el.innerHTML = '<div class="empty">No rows match.</div>'; return; }
+  const v = (name) => { const h = headerByName(d, name); return h ? rec.values[h.col] || '' : ''; };
+  const title = v('Paper') || v('Title') || v(d.headers[1]?.name || '') || `Row ${rec.rowNumber}`;
+  const idLabel = v('E#') || v('Rank') || v('Record');
+  const sentence = v('Evidence sentence');
+  const mine = d.headers.filter(isMine);
+  const sh = statusHeader(d);
+
+  let html = `<h2>${esc(title)}</h2><div class="sub">${esc(idLabel)}${v('Sub-question') ? ' · ' + esc(v('Sub-question')) : ''}</div>`;
+  if (sh) {
+    const val = rec.values[sh.col] || '';
+    html += `<div class="pills"><span class="label">${esc(sh.name)}</span>` +
+      [['', 'Not reviewed', 'none'], ...sh.options.map((o) => [o, o, TONES[o] || 'none'])].map(([val2, label, tone], i) =>
+        `<button class="pill ${val === val2 ? 'on' : ''}" data-tone="${tone}" data-col="${sh.col}" data-val="${esc(val2)}" title="Key ${i}">${esc(label)}</button>`).join('') +
+      '</div>';
+  }
+  for (const name of s.view) {
+    const h = d.headers.find((x) => x.name === name);
+    if (!h || isMine(h)) continue;
+    const text = rec.values[h.col] || '';
+    const body = /^Abstract/.test(h.name) && sentence ? highlight(text, sentence) : esc(text) || '<span class="muted">–</span>';
+    html += `<div class="field"><h3>${esc(h.name)}</h3><div class="body">${body}</div></div>`;
+  }
+  for (const h of mine) {
+    if (h === sh || !s.view.includes(h.name) && !/comment|edited/i.test(h.name)) continue;
+    const key = `${cur}|${rec.rowNumber}|${h.col}`;
+    const val = rec.values[h.col] || '';
+    const ph = /edited fact/i.test(h.name) ? 'Rewrite the fact here if the LLM fact is wrong (leave empty if it is fine)' : 'Your notes';
+    const input = h.options && h.options.length
+      ? `<div class="pills">${['', ...h.options].map((o) => `<button class="pill ${val === o ? 'on' : ''}" data-tone="${TONES[o] || 'none'}" data-col="${h.col}" data-val="${esc(o)}">${esc(o || 'None')}</button>`).join('')}</div>`
+      : `<textarea data-col="${h.col}" placeholder="${esc(ph)}">${esc(val)}</textarea>`;
+    html += `<div class="field mine ${edits.has(key) ? 'edited' : ''}"><h3>${esc(h.name)}</h3>${input}</div>`;
+  }
+  html += `<div class="keys"><kbd>↑</kbd><kbd>↓</kbd> or <kbd>j</kbd><kbd>k</kbd> move · ` +
+    (sh ? `<kbd>0</kbd>–<kbd>${sh.options.length}</kbd> set ${esc(sh.name.toLowerCase())} · ` : '') + `<kbd>/</kbd> search</div>`;
+  el.innerHTML = html;
+}
+
+function renderFieldsPanel() {
+  const d = data[cur], s = sheetSettings(cur);
+  $('fieldRows').innerHTML = d.headers.map((h) =>
+    `<tr><td>${esc(h.name)}</td><td><input type="checkbox" data-kind="list" data-name="${esc(h.name)}" ${s.list.includes(h.name) ? 'checked' : ''}></td>` +
+    `<td><input type="checkbox" data-kind="view" data-name="${esc(h.name)}" ${s.view.includes(h.name) || (isMine(h) && /comment|edited/i.test(h.name)) || h === statusHeader(d) ? 'checked' : ''} ${isMine(h) ? 'disabled title="Always shown"' : ''}></td></tr>`).join('');
+}
+
+function updateStatus() {
+  if (MODE === 'artifact') {
+    const line = $('statusLine');
+    line.textContent = saveError || (saving ? 'Saving…' : edits.size ? `${edits.size} change${edits.size > 1 ? 's' : ''} saved to claude.ai` : 'Changes save automatically');
+    line.classList.toggle('dirty', !!saveError);
+    return;
+  }
+  const n = edits.size;
+  $('statusLine').textContent = n ? `${n} change${n > 1 ? 's' : ''} not saved into this page` : 'All changes saved';
+  $('statusLine').classList.toggle('dirty', n > 0);
+}
+
+function showBanner(msg) { $('banner').textContent = msg; $('banner').classList.remove('hidden'); setTimeout(() => $('banner').classList.add('hidden'), 9000); }
+
+/* ---------------------------------------------------------------- saving */
+
+async function saveFile(bytes, name, type, description) {
+  const blob = new Blob([bytes], { type });
+  if (window.showSaveFilePicker) {
+    try {
+      const ext = '.' + name.split('.').pop();
+      const handle = await window.showSaveFilePicker({ suggestedName: name, types: [{ description, accept: { [type]: [ext] } }] });
+      const w = await handle.createWritable();
+      await w.write(blob);
+      await w.close();
+      return true;
+    } catch (e) {
+      if (e.name === 'AbortError') return false;
+    }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  return true;
+}
+
+$('saveXlsx').onclick = async () => {
+  const bytes = await wb.toBytes();
+  if (await saveFile(bytes, fileName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Excel workbook'))
+    showBanner('Saved the workbook. Your changes also stay in this browser; use "Save as HTML" to keep them inside this page.');
+};
+
+$('saveHtml').onclick = async () => {
+  const b64 = bytesToB64(await wb.toBytes());
+  const html = ORIGINAL
+    .replace(/(<script id="xlsx-data" type="text\/plain">)[\s\S]*?(<\/script>)/, (_, a, b) => a + b64 + b)
+    .replace(/(<script id="settings-data" type="application\/json">)[\s\S]*?(<\/script>)/, (_, a, b) => a + JSON.stringify(settings).replace(/</g, '\\u003c') + b);
+  if (await saveFile(new TextEncoder().encode(html), 'review.html', 'text/html', 'Web page')) {
+    store.del(dataKey);
+    wb.markClean();
+    edits = new Map();
+    updateStatus();
+    renderDetail();
+    showBanner('Saved. Open the new review.html to continue from here; it contains your changes and field choices.');
+  }
+};
+
+$('openBtn').onclick = () => $('openInput').click();
+$('openInput').onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  if (edits.size && !confirm('Open another workbook? Changes not saved into this page stay in this browser for this data only.')) return;
+  try { await loadBytes(new Uint8Array(await f.arrayBuffer()), f.name); showBanner(`Opened ${f.name}.`); }
+  catch (err) { showBanner('Could not open that file: ' + err.message); }
+  e.target.value = '';
+};
+
+/* ---------------------------------------------------------------- events */
+
+$('tabs').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; cur = b.dataset.sheet; selRow = null; renderAll(); };
+$('search').oninput = () => { renderList(); renderDetail(); };
+$('statusFilter').onchange = () => { renderList(); renderDetail(); };
+$('list').onclick = (e) => { const r = e.target.closest('.list-row'); if (!r) return; selRow = Number(r.dataset.row); renderList(); renderDetail(); };
+$('detail').onclick = (e) => {
+  const p = e.target.closest('.pill');
+  if (p) { applyEdit(`${cur}|${selRow}|${p.dataset.col}`, p.dataset.val); renderList(); renderDetail(); return; }
+  const f = e.target.closest('.field');
+  if (f && !f.classList.contains('mine') && $('detail').classList.contains('clamp')) f.classList.toggle('open');
+};
+$('detail').addEventListener('change', (e) => {
+  if (e.target.tagName !== 'TEXTAREA') return;
+  applyEdit(`${cur}|${selRow}|${e.target.dataset.col}`, e.target.value);
+  e.target.closest('.field').classList.add('edited');
+  renderList();
+});
+$('fieldsBtn').onclick = (e) => { e.stopPropagation(); $('fieldsPanel').classList.toggle('hidden'); };
+document.addEventListener('click', (e) => { if (!e.target.closest('.menu')) $('fieldsPanel').classList.add('hidden'); });
+$('fieldRows').onchange = (e) => {
+  const s = sheetSettings(cur), { kind, name } = e.target.dataset;
+  s[kind] = e.target.checked ? [...s[kind], name] : s[kind].filter((n) => n !== name);
+  saveSettings(); renderList(); renderDetail();
+};
+$('fieldsReset').onclick = () => { delete settings[cur]; saveSettings(); renderAll(); };
+$('wrapOn').onclick = () => { sheetSettings(cur).wrap = true; saveSettings(); renderAll(); };
+$('wrapOff').onclick = () => { sheetSettings(cur).wrap = false; saveSettings(); renderAll(); };
+
+function setTheme(t) {
+  if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  store.set('litreview:theme', t);
+  ['Auto', 'Light', 'Dark'].forEach((x) => $('th' + x).classList.toggle('on', x.toLowerCase() === t));
+}
+$('thAuto').onclick = () => setTheme('auto'); $('thLight').onclick = () => setTheme('light'); $('thDark').onclick = () => setTheme('dark');
+setTheme(store.get('litreview:theme', 'auto'));
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input, textarea, select') || e.metaKey || e.ctrlKey || e.altKey) return;
+  const rows = visibleRecords(), i = rows.findIndex((r) => r.rowNumber === selRow);
+  if (e.key === 'ArrowDown' || e.key === 'j') { if (i < rows.length - 1) selRow = rows[i + 1].rowNumber; }
+  else if (e.key === 'ArrowUp' || e.key === 'k') { if (i > 0) selRow = rows[i - 1].rowNumber; }
+  else if (e.key === '/') { e.preventDefault(); $('search').focus(); return; }
+  else if (/^[0-9]$/.test(e.key)) {
+    const sh = statusHeader(data[cur]), n = Number(e.key);
+    if (!sh || n > sh.options.length || selRow === null) return;
+    applyEdit(`${cur}|${selRow}|${sh.col}`, n === 0 ? '' : sh.options[n - 1]);
+  } else return;
+  e.preventDefault();
+  renderList(); renderDetail();
+});
+if (MODE === 'file') window.addEventListener('beforeunload', (e) => { if (edits.size) { e.preventDefault(); e.returnValue = ''; } });
+if (MODE === 'artifact') {
+  ['saveXlsx', 'saveHtml', 'openBtn'].forEach((id) => $(id).classList.add('hidden'));
+  $('exportBtn').onclick = async () => {
+    const downloads = window.claude?.use ? await window.claude.use('downloads') : null;
+    if (!downloads) { showBanner('Downloads are not available in this view.'); return; }
+    try { await downloads.save({ filename: 'lit_review.xlsx', data: new Blob([await wb.toBytes()]) }); showBanner('Exported the workbook with the review changes.'); }
+    catch (e) { if (e.code !== 'declined') showBanner('Export failed: ' + (e.message || e.code)); }
+  };
+  window.claude?.use?.('downloads').then((d) => { if (d) $('exportBtn').classList.remove('hidden'); });
+}
+
+loadBytes(b64ToBytes($('xlsx-data').textContent), 'lit_review.xlsx').then(() => { if (MODE === 'artifact') connectDb(); }).catch((err) => {
+  $('detail').innerHTML = `<div class="empty">Could not read the workbook inside this page: ${esc(err.message)}</div>`;
+});
+</script>
+</body>
+</html>
