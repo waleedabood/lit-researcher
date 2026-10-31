@@ -8,6 +8,7 @@ A Claude skill for reproducible, verified literature searches on clinical and bi
 - Claude proposes the search concepts (you approve them), screens papers and picks the sentence that answers each question.
 - Code copies that sentence word for word from the paper, checks every number against the source, and checks every reference against Crossref / DataCite / PubMed, including retractions.
 - You get an Excel workbook and a review page with the exact source sentence next to every fact, plus a "Your verdict" column.
+- You also get `references.ris`: every included paper with abstract, links and the verified key-finding sentences, ready for Zotero, EndNote or Mendeley (File → Import).
 
 Nothing factual reaches you unless code found it in a registry or in the paper's own text.
 
@@ -45,7 +46,7 @@ Ask a clinical question, e.g. *"What is the recurrence risk after a first unprov
 
 1. Claude scores your question and proposes search concepts and sub-questions. Reply **approved** or edit them.
 2. The search, screening, retrieval and fact extraction run.
-3. You get `lit_review.xlsx` and a review page. Mark each fact Accepted / Partly correct / Rejected.
+3. You get `lit_review.xlsx`, a review page and `references.ris`. Mark each fact Accepted / Partly correct / Rejected, and import the .ris into your reference manager.
 
 ## Limits
 

@@ -145,7 +145,7 @@ Follow `references/ref-check.md` on `facts.md` with `--out <dir>/refcheck` (dele
 python3 <skill-dir>/scripts/litsearch.py workbook <dir>
 ```
 
-`lit_review.xlsx` opens on **Evidence**: one row per fact with the paper, flags, full text vs abstract, the exact source sentence, the LLM fact and fields, the ref-check result, and the user's **Your verdict** column; then Screening (with **Your decision**), All records (every de-duplicated record with its status, including those ranked too low to screen, and a **Your decision** column), Search log (queries, hits, flow counts, exclusion reasons), Protocol (with the question check) and References. Give the user the workbook as a downloadable file (in Claude apps, copy it to the outputs folder, e.g. `/mnt/user-data/outputs/`, or use the file-presenting tool).
+`lit_review.xlsx` opens on **Evidence**: one row per fact with the paper, flags, full text vs abstract, the exact source sentence, the LLM fact and fields, the ref-check result, and the user's **Your verdict** column; then Screening (with **Your decision**), All records (every de-duplicated record with its status, including those ranked too low to screen, and a **Your decision** column), Search log (queries, hits, flow counts, exclusion reasons), Protocol (with the question check) and References. The same command also writes `references.ris` (every included paper with title, authors, journal, DOI and PubMed links, abstract, and the verified source sentences as notes), which imports into Zotero, EndNote or Mendeley in one step (File → Import). Give the user the workbook and `references.ris` as downloadable files (in Claude apps, copy it to the outputs folder, e.g. `/mnt/user-data/outputs/`, or use the file-presenting tool).
 
 The same command writes two review pages from the workbook. Both have the list of rows on the left and the expanded view on the right (by default: paper, LLM fact, exact extract, and the whole abstract with the extract highlighted), a Fields menu, wrap/compact text, filters, and status buttons (Not reviewed / Accepted / Partly correct / Rejected) plus "Your comment" and "Your edited fact" boxes. Rebuilding the workbook keeps whatever the user has already entered in the "Your …" columns.
 
@@ -161,7 +161,7 @@ python3 <skill-dir>/scripts/litsearch.py summary <dir>
 ```
 
 Reply with, in this order:
-1. The workbook file and the review page (the artifact, or `review.html` as a download).
+1. The workbook file, `references.ris` (for Zotero/EndNote/Mendeley: File → Import), and the review page (the artifact, or `review.html` as a download).
 2. Flow counts: records found → screened → included → facts verified → ref-check verdicts.
 3. The bottom line per sub-question in 1–3 sentences, using only verified facts with their E-numbers and reference numbers. Say plainly when evidence is thin, retrospective, abstract-only or absent; an empty answer is a finding.
 4. Flags: retracted / concern / preprint / letter papers, abstract-only papers carrying key facts, internal inconsistencies in sources, judgment calls the user may want to overrule.

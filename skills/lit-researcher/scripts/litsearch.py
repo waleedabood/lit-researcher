@@ -1100,6 +1100,50 @@ def cmd_workbook(a):
     wb.save(d / "lit_review.xlsx")
     print(f"workbook -> {d / 'lit_review.xlsx'}", file=sys.stderr)
     write_review_page(d)
+    write_ris(d)
+
+
+def write_ris(d):
+    """references.ris for Zotero / EndNote / Mendeley: one entry per included paper, built only from registry
+    metadata (records.json) plus the code-verified source sentences (evidence.json) as notes."""
+    d = Path(d)
+    recs = load(d, "records.json")
+    recs = recs if isinstance(recs, dict) else {r["id"]: r for r in recs}
+    include = [x["id"] for x in load(d, "screening_decisions.json", []) if x.get("decision") == "include"]
+    ev = {}
+    for e in load(d, "evidence.json", []):
+        if str(e.get("status", "")).lower() == "verified":
+            ev.setdefault(e["paper_id"], []).append(e)
+    topic = load(d, "protocol.json", {}).get("title", "")
+    out, n = [], 0
+    for rid in include:
+        r = recs.get(rid)
+        if not r:
+            continue
+        n += 1
+        out.append("TY  - JOUR" if r.get("journal") else "TY  - GEN")
+        out.append("TI  - " + (r.get("title") or "").rstrip("."))
+        for au in r.get("authors") or []:
+            last, _, ini = au.rpartition(" ")
+            out.append("AU  - " + (f"{last}, {ini}" if last and ini.isupper() else au))
+        for tag, key in (("PY", "year"), ("JO", "journal"), ("VL", "volume"), ("IS", "issue"), ("SP", "pages")):
+            if r.get(key):
+                out.append(f"{tag}  - {r[key]}")
+        if r.get("doi"):
+            out += ["DO  - " + r["doi"], "UR  - https://doi.org/" + r["doi"]]
+        if r.get("pmid"):
+            out += ["UR  - https://pubmed.ncbi.nlm.nih.gov/" + r["pmid"] + "/", "AN  - PMID:" + r["pmid"]]
+        if r.get("abstract"):
+            out.append("AB  - " + " ".join(r["abstract"].split()))
+        for e in ev.get(rid, []):
+            out.append(f"N1  - {e['id']} ({e['subq']}) verified source sentence: " + " ".join(e["sentence"].split()))
+        out += ["KW  - lit-researcher"] + (["KW  - " + topic] if topic else []) + ["ER  - ", ""]
+    (d / "references.ris").write_text("\n".join(out), encoding="utf-8")
+    print(f"references.ris -> {d / 'references.ris'} ({n} papers; import into Zotero with File > Import)", file=sys.stderr)
+
+
+def cmd_ris(a):
+    write_ris(a.dir)
 
 
 def main():
@@ -1108,7 +1152,7 @@ def main():
     imp = sub.add_parser("import-edits")
     imp.add_argument("dir")
     imp.add_argument("file", help="JSON from the review artifact's reviews/<dir name>/edits collection (ArtifactData list)")
-    for name in ("check", "search", "rank", "retrieve", "verify", "facts", "summary", "paragraph", "draft", "workbook", "chase", "queries"):
+    for name in ("check", "search", "rank", "retrieve", "verify", "facts", "summary", "paragraph", "draft", "workbook", "chase", "queries", "ris"):
         s = sub.add_parser(name)
         s.add_argument("dir")
         if name == "chase":
@@ -1129,7 +1173,7 @@ def main():
         print(json.dumps(build_queries(load(a.dir, "protocol.json")), indent=1))
         return
     sys.exit({"import-edits": cmd_import_edits, "check": cmd_check, "search": cmd_search, "chase": cmd_chase, "rank": cmd_rank, "retrieve": cmd_retrieve,
-              "verify": cmd_verify, "facts": cmd_facts, "summary": cmd_summary, "paragraph": cmd_paragraph, "draft": cmd_draft, "workbook": cmd_workbook}[a.cmd](a) or 0)
+              "verify": cmd_verify, "facts": cmd_facts, "summary": cmd_summary, "paragraph": cmd_paragraph, "draft": cmd_draft, "workbook": cmd_workbook, "ris": cmd_ris}[a.cmd](a) or 0)
 
 
 if __name__ == "__main__":
