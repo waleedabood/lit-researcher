@@ -18,7 +18,7 @@ Nothing factual reaches you unless code found it in a registry or in the paper's
 **Claude Code:**
 
 ```
-/plugin install lit-researcher --marketplace YOUR-GITHUB-USERNAME/lit-researcher
+/plugin install lit-researcher --marketplace waleedabood/lit-researcher
 ```
 
 **Python 3:** already included when you use the skill in the Claude app. Only needed on your own computer if you run it in Claude Code (install from python.org). Packages install on first run, or with `pip install -r skills/lit-researcher/requirements.txt`.

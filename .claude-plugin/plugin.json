@@ -14,5 +14,10 @@
     "citations"
   ],
   "license": "MIT",
+  "homepage": "https://github.com/waleedabood/lit-researcher",
+  "repository": "https://github.com/waleedabood/lit-researcher",
+  "documentationUrl": "https://github.com/waleedabood/lit-researcher#readme",
+  "supportUrl": "https://github.com/waleedabood/lit-researcher/issues",
+  "privacyPolicyUrl": "https://github.com/waleedabood/lit-researcher/blob/main/PRIVACY.md",
   "icon": "./.claude-plugin/icon.png"
 }
