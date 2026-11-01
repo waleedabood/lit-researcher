@@ -413,6 +413,8 @@ def verify_reference(http, ref):
                                 ("PMCID", ref.get("pmcid"), f"PMCID:{ref.get('pmcid')}")):
         if not doi and value:
             doi = doi_from_id(http, query)
+            if not doi and label == "PMID":
+                doi = (pubmed_summary(http, value) or {}).get("doi") or None
             if doi:
                 notes.append(f"DOI {doi} found from {label} {value}")
     work, match, status = None, None, None
@@ -444,6 +446,12 @@ def verify_reference(http, ref):
                 ref["suggested_title"] = found[0]["title"]
         elif status is None:
             status = "not_found"
+    if status == "not_found" and ref.get("pmid"):
+        pm = pubmed_summary(http, ref["pmid"])
+        if pm:
+            work, match = pm, compare(ref, pm)
+            status = "found_without_doi" if classify(match) in ("verified", "verified_no_title") else "metadata_discrepancy"
+            notes.append(f"no DOI; checked against the PubMed record PMID {ref['pmid']}")
     if match:
         if match["year_ok"] == "close":
             notes.append(f"year differs by one from the registry ({work['years']}); usually online-first vs print")
@@ -465,6 +473,37 @@ def verify_reference(http, ref):
 
 
 # ---------------------------------------------------------------- source text
+
+EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+
+
+def pubmed_summary(http, pmid):
+    """A PubMed record in the same shape as a registry work (fallback when Europe PMC is blocked)."""
+    status, body = http.get(f"{EUTILS}/efetch.fcgi?db=pubmed&retmode=xml&id={pmid}")
+    if status != 200 or "<PubmedArticle" not in body:
+        return None
+    try:
+        art = next(ET.fromstring(body).iter("PubmedArticle"))
+    except (ET.ParseError, StopIteration):
+        return None
+    a = art.find("MedlineCitation/Article")
+    j = a.find("Journal")
+    first = a.findtext("AuthorList/Author/LastName") or a.findtext("AuthorList/Author/CollectiveName") or ""
+    year = j.findtext("JournalIssue/PubDate/Year") or (j.findtext("JournalIssue/PubDate/MedlineDate") or "")[:4]
+    ids = {i.get("IdType"): i.text for i in art.findall("PubmedData/ArticleIdList/ArticleId")}
+    abstract = " ".join((f"{t.get('Label')}: " if t.get("Label") else "") + "".join(t.itertext())
+                        for t in a.findall("Abstract/AbstractText"))
+    return {"doi": (ids.get("doi") or "").lower(), "title": collapse("".join(a.find("ArticleTitle").itertext())),
+            "first_author": first, "years": [int(year)] if year.isdigit() else [],
+            "journal": j.findtext("ISOAbbreviation") or j.findtext("Title") or "", "updates": [],
+            "abstract": collapse(abstract), "registry": "pubmed", "pmid": str(pmid)}
+
+
+def pmid_for_doi(http, doi):
+    _, data = http.json(f"{EUTILS}/esearch.fcgi?db=pubmed&retmode=json&term=" + quote(f"{doi}[doi]"))
+    ids = (data or {}).get("esearchresult", {}).get("idlist", [])
+    return ids[0] if len(ids) == 1 else None
+
 
 def _jats_sentences(xml_text):
     root = ET.fromstring(xml_text)
@@ -524,6 +563,12 @@ def fetch_source(http, ref, local_dir):
     else:
         doi = work.get("doi") or ref.get("doi")
     if not doi:
+        if work.get("registry") == "pubmed" and work.get("abstract"):
+            return "abstract", f"PubMed abstract (PMID {work['pmid']})", sentences(work["abstract"])
+        if ref.get("pmid"):
+            pm = pubmed_summary(http, ref["pmid"])
+            if pm and pm["abstract"]:
+                return "abstract", f"PubMed abstract (PMID {ref['pmid']})", sentences(pm["abstract"])
         return "none", "no verified DOI to look up", []
     _, data = http.json("https://www.ebi.ac.uk/europepmc/webservices/rest/search?format=json&resultType=core&query="
                         + quote(f'DOI:"{doi}"'))
@@ -550,6 +595,10 @@ def fetch_source(http, ref, local_dir):
     if inverted:
         words = sorted((pos, w) for w, positions in inverted.items() for pos in positions)
         return "abstract", "OpenAlex abstract", sentences(" ".join(w for _, w in words))
+    pmid = ref.get("pmid") or pmid_for_doi(http, doi)
+    pm = pubmed_summary(http, pmid) if pmid else None
+    if pm and pm["abstract"]:
+        return "abstract", f"PubMed abstract (PMID {pmid})", sentences(pm["abstract"])
     return "none", "no open full text or abstract found", []
 
 
