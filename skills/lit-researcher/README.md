@@ -14,15 +14,13 @@ Nothing factual reaches you unless code found it in a registry or in the paper's
 
 ## Install
 
-**Claude app (paid plans):**
+**Claude app:**
 
-1. Go to Customize → Plugins → Add → Add marketplace.
-2. Under "Add from a repository", paste `waleedabood/lit-researcher`.
-3. Install *Lit Researcher*.
+1. Download [`lit-researcher.zip`](https://github.com/waleedabood/lit-researcher/releases/latest/download/lit-researcher.zip).
+2. Go to Customize → Skills → **+** → Create skill → Upload a skill.
+3. Choose the zip, then start a new chat.
 
-Plugins added this way also work in Cowork and in Claude Code when you sign in with the same account.
-
-**Or upload the zip:** download [`lit-researcher.zip`](https://github.com/waleedabood/lit-researcher/releases/latest/download/lit-researcher.zip), then go to Customize → Skills → **+** → Create skill → Upload a skill.
+**Or add it from the repository (paid plans):** go to Customize → Plugins → Add → Add marketplace, paste `waleedabood/lit-researcher` under "Add from a repository", and install *Lit Researcher*. Plugins added this way also work in Cowork and in Claude Code when you sign in with the same account.
 
 **Claude directory:** Lit Researcher is under review and not listed yet.
 
