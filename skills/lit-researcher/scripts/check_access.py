@@ -30,8 +30,9 @@ for name, domain, url, essential in HOSTS:
         code = requests.get(url, timeout=20).status_code
         ok = code < 500 and code != 429
         if code == 429:
-            print(f"LIMITED {name} ({domain}): HTTP 429 rate/credit limit. Set OPENALEX_API_KEY (free key at openalex.org) "
-                  "or OPENALEX_EMAIL; until then citation chasing uses Europe PMC.")
+            hint = {"OpenAlex": "Set OPENALEX_API_KEY (free key at openalex.org) or OPENALEX_EMAIL; until then citation chasing uses the next source.",
+                    "Semantic Scholar": "Citation chasing uses the next source."}.get(name, "Requests may fail for now; try again shortly.")
+            print(f"LIMITED {name} ({domain}): HTTP 429 rate/credit limit. {hint}")
     except requests.RequestException:
         ok = False
     if ok or code != 429:
@@ -46,6 +47,6 @@ if blocked:
     print("Then start a new chat (open chats keep the old setting).")
     if any(essential for _, essential in blocked):
         sys.exit(1)
-    print("\nOnly optional sources are blocked: the search can run. Without Europe PMC, the search uses PubMed and ClinicalTrials.gov and open full text comes from PubMed Central via NCBI. Without OpenAlex or Semantic Scholar, citation chasing uses Europe PMC; without DataCite or doi.org, DOIs outside Crossref show as not found.")
+    print("\nOnly optional sources are blocked: the search can run. Without Europe PMC, the search uses PubMed and ClinicalTrials.gov and open full text comes from PubMed Central via NCBI. Without OpenAlex or Semantic Scholar, citation chasing uses Europe PMC or PubMed's own links; without DataCite or doi.org, DOIs outside Crossref show as not found.")
     sys.exit(0)
 print("\nAll set.")

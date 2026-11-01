@@ -28,12 +28,13 @@ Nothing factual reaches you unless code found it in a registry or in the paper's
 - Required: `eutils.ncbi.nlm.nih.gov`, `clinicaltrials.gov`, `api.crossref.org`
 - Recommended: `www.ebi.ac.uk` (Europe PMC; without it, full text comes from PubMed Central via NCBI), `api.openalex.org`, `api.datacite.org`, `doi.org`
 - Optional: `api.semanticscholar.org`
+- Only if a Python package is missing: `pypi.org`, `files.pythonhosted.org` (the scripts install missing packages on first run)
 
 The skill runs `check_access.py` first and tells you exactly which sites are missing.
 
 ### Optional: OpenAlex key
 
-OpenAlex now limits anonymous requests. Without a key, citation chasing falls back to Europe PMC (results still come, slightly fewer). To use OpenAlex, set either environment variable:
+OpenAlex now limits anonymous requests. Without a key, citation chasing falls back to Semantic Scholar, then Europe PMC, then PubMed's own reference and cited-by links (results still come, possibly fewer). To use OpenAlex, set either environment variable:
 
 ```
 OPENALEX_API_KEY=your-free-key   # from openalex.org
@@ -52,5 +53,5 @@ Ask a clinical question, e.g. *"What is the recurrence risk after a first unprov
 
 - Facts come from open full text where available, otherwise from abstracts (flagged as "abstract only").
 - Screening and sentence choice are LLM judgments; review them. The workbook shows every decision with its reason.
-- Papers without a DOI (often older journals) are verified against PubMed, but the second-pass reference check has no source text for them.
+- Papers without a DOI (often older journals) are verified against PubMed. The second-pass reference check reads their PubMed abstract, so it has no source text only when there is no PMID or no abstract.
 - Not a substitute for a formal systematic review protocol (dual independent screening, risk-of-bias assessment).

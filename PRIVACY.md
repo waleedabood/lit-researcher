@@ -12,7 +12,11 @@ To answer a question, the scripts send **search terms, identifiers (PMID, DOI, N
 - Crossref (`api.crossref.org`)
 - OpenAlex (`api.openalex.org`), DataCite (`api.datacite.org`), doi.org, and optionally Semantic Scholar (`api.semanticscholar.org`)
 
-Nothing else is sent. Don't put patient-identifying information in your question: like any search, its terms go to these services.
+Nothing else is sent, apart from the package installs described below. Don't put patient-identifying information in your question: like any search, its terms go to these services.
+
+## Package installs
+
+If a required Python package is missing, the scripts install it with pip, which downloads it from PyPI (`pypi.org`, `files.pythonhosted.org`). pip sends the package names and its usual technical details, such as the Python version and operating system. Your question and results are not part of this.
 
 ## Optional settings
 
