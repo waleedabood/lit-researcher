@@ -27,8 +27,13 @@ from math import log
 from pathlib import Path
 from urllib.parse import quote
 
-import requests
-from rapidfuzz import fuzz
+sys.path.insert(0, str(Path(__file__).parent))
+from ensure_packages import ensure_packages  # noqa: E402
+
+ensure_packages()
+
+import requests  # noqa: E402
+from rapidfuzz import fuzz  # noqa: E402
 
 try:
     import pysbd

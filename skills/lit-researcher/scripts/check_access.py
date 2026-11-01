@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Check that the Python packages and the literature APIs this skill needs are reachable."""
-import importlib.util
 import os
 import sys
+from pathlib import Path
 
-missing = [m for m in ("requests", "rapidfuzz", "openpyxl", "docx", "pypdf") if importlib.util.find_spec(m) is None]
-if missing:
-    names = {"docx": "python-docx"}
-    print("MISSING PACKAGES: pip install " + " ".join(names.get(m, m) for m in missing))
-    sys.exit(1)
+sys.path.insert(0, str(Path(__file__).parent))
+from ensure_packages import ensure_packages  # noqa: E402
+
+ensure_packages()
 
 import requests  # noqa: E402
 
