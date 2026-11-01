@@ -15,7 +15,7 @@ import requests  # noqa: E402
 # (label, domain, test URL, essential). Semantic Scholar is a chasing fallback; DataCite and doi.org only verify DOIs Crossref doesn't hold.
 HOSTS = [
     ("PubMed", "eutils.ncbi.nlm.nih.gov", "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi?retmode=json", True),
-    ("Europe PMC", "www.ebi.ac.uk", "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=epilepsy&format=json&pageSize=1", True),
+    ("Europe PMC", "www.ebi.ac.uk", "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=epilepsy&format=json&pageSize=1", False),
     ("ClinicalTrials.gov", "clinicaltrials.gov", "https://clinicaltrials.gov/api/v2/studies?pageSize=1", True),
     ("Crossref", "api.crossref.org", "https://api.crossref.org/works?rows=1", True),
     ("OpenAlex", "api.openalex.org", "https://api.openalex.org/works?per-page=1&filter=cites:W2134365734"
@@ -47,6 +47,6 @@ if blocked:
     print("Then start a new chat (open chats keep the old setting).")
     if any(essential for _, essential in blocked):
         sys.exit(1)
-    print("\nOnly optional fallbacks are blocked: the search can run. Without OpenAlex or Semantic Scholar, citation chasing uses Europe PMC; without DataCite or doi.org, DOIs outside Crossref show as not found.")
+    print("\nOnly optional sources are blocked: the search can run. Without Europe PMC, the search uses PubMed and ClinicalTrials.gov and open full text comes from PubMed Central via NCBI. Without OpenAlex or Semantic Scholar, citation chasing uses Europe PMC; without DataCite or doi.org, DOIs outside Crossref show as not found.")
     sys.exit(0)
 print("\nAll set.")

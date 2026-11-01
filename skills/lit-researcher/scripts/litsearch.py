@@ -426,6 +426,21 @@ def links_epmc(http, r, cap):
     return out[0], out[1], max(len(out[0]), len(out[1])) == cap
 
 
+def links_pubmed(http, r, cap):
+    """References and citing papers from PubMed's own links (PMC-indexed only, so fewer; last fallback)."""
+    if not r["pmid"]:
+        return None
+    out = []
+    for linkname in ("pubmed_pubmed_refs", "pubmed_pubmed_citedin"):
+        status, res = http.json(f"{EUTILS}/elink.fcgi?dbfrom=pubmed&db=pubmed&linkname={linkname}&retmode=json&id={r['pmid']}")
+        if res is None:
+            return None
+        sets = ((res.get("linksets") or [{}])[0].get("linksetdbs") or [])
+        ids = [str(x) for x in (sets[0]["links"] if sets else [])][:cap]
+        out.append(pubmed_records(http, ids))
+    return out[0], out[1], max(len(out[0]), len(out[1])) == cap
+
+
 def similar_pubmed(http, pmid, n):
     _, res = http.json(f"{EUTILS}/elink.fcgi?dbfrom=pubmed&db=pubmed&linkname=pubmed_pubmed&retmode=json&id={pmid}")
     sets = ((res or {}).get("linksets") or [{}])[0].get("linksetdbs") or []
@@ -434,13 +449,14 @@ def similar_pubmed(http, pmid, n):
 
 
 def cmd_chase(a):
-    """References and citing papers of each seed (OpenAlex, else Semantic Scholar, else Europe PMC),
+    """References and citing papers of each seed (OpenAlex, else Semantic Scholar, else Europe PMC, else PubMed links),
     plus PubMed's similar articles, which find new papers that nobody has cited yet."""
     d = Path(a.dir)
     http = http_for(d)
     records, log = load(d, "records.json"), load(d, "search_log.json")
     added_total, chased = 0, []
-    sources = [("OpenAlex", links_openalex), ("Semantic Scholar", links_s2), ("Europe PMC", links_epmc)]
+    sources = [("OpenAlex", links_openalex), ("Semantic Scholar", links_s2), ("Europe PMC", links_epmc),
+               ("PubMed links", links_pubmed)]
     for rid in a.seeds.split(","):
         rid = rid.strip()
         r = records.get(rid)

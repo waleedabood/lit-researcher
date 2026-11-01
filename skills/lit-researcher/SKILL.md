@@ -1,7 +1,7 @@
 ---
 name: lit-researcher
 description: Reproducible, verified literature search for clinical and biomedical questions. Turns the user's question into search concepts for them to approve, then runs logged searches of PubMed, Europe PMC and ClinicalTrials.gov, chases citations, screens papers, and builds a fact table in which every sentence and number is checked by code against the source and every reference is checked against registries (DOI, year, author, retractions), ending with an Excel workbook and a fact list with exact quotes. Use this whenever the user asks what the literature says about a medical question, wants a literature search, evidence review, evidence table, or "what is the outcome / prognostic value / efficacy / accuracy of X in Y" with citations, even if they don't say "literature search". Not for checking an existing manuscript's references (that is a reference check) or for general web questions.
-compatibility: Needs Python 3 with network access to eutils.ncbi.nlm.nih.gov, www.ebi.ac.uk, clinicaltrials.gov, api.crossref.org, api.openalex.org, api.datacite.org and doi.org (api.semanticscholar.org optional, as a citation-chasing fallback); packages requests, rapidfuzz, openpyxl, python-docx, pypdf (pysbd optional, for better sentence splitting). OpenAlex citation chasing needs OPENALEX_API_KEY or OPENALEX_EMAIL; without it chasing uses Europe PMC.
+compatibility: Needs Python 3 with network access to eutils.ncbi.nlm.nih.gov, clinicaltrials.gov, api.crossref.org, api.openalex.org, api.datacite.org and doi.org (www.ebi.ac.uk for Europe PMC recommended; api.semanticscholar.org optional, as a citation-chasing fallback); packages requests, rapidfuzz, openpyxl, python-docx, pypdf (pysbd optional, for better sentence splitting). OpenAlex citation chasing needs OPENALEX_API_KEY or OPENALEX_EMAIL; without it chasing uses Europe PMC.
 ---
 
 # Literature researcher
@@ -18,7 +18,7 @@ The reason for this split: language models invent plausible citations, numbers a
 python3 <skill-dir>/scripts/check_access.py
 ```
 
-If packages are missing, `pip install -r <skill-dir>/requirements.txt`. If OpenAlex shows LIMITED, carry on: citation chasing falls back to Europe PMC; mention once that setting `OPENALEX_API_KEY` (free at openalex.org) or `OPENALEX_EMAIL` restores it. If the script exits with an error because sites are blocked, show the user its output as printed: the blocked domains, one per line (the Allowed websites list takes one site per entry), and the settings path (Settings → Capabilities → Create and edit files → Use the internet while making files → Allowed websites → Manage). Then stop; the search cannot work without them. If only the optional sites (Semantic Scholar, DataCite, doi.org) are blocked, the script exits cleanly: carry on, and mention it once in the reply.
+If packages are missing, `pip install -r <skill-dir>/requirements.txt`. If OpenAlex shows LIMITED, carry on: citation chasing falls back to Europe PMC; mention once that setting `OPENALEX_API_KEY` (free at openalex.org) or `OPENALEX_EMAIL` restores it. If the script exits with an error because sites are blocked, show the user its output as printed: the blocked domains, one per line (the Allowed websites list takes one site per entry), and the settings path (Settings → Capabilities → Create and edit files → Use the internet while making files → Allowed websites → Manage). Then stop; the search cannot work without them. If only the optional sites (Europe PMC, Semantic Scholar, DataCite, doi.org) are blocked, the script exits cleanly: carry on, and mention it once in the reply. Without Europe PMC the search runs on PubMed and ClinicalTrials.gov, and open full text comes from PubMed Central through NCBI instead; a host that fails once is skipped for the rest of the run, so a blocked site costs one timeout, not one per paper.
 
 ## 1. Question check and concepts, then stop for approval
 
@@ -96,7 +96,7 @@ python3 <skill-dir>/scripts/litsearch.py chase <dir> --seeds PMID:123,PMID:456
 python3 <skill-dir>/scripts/litsearch.py rank <dir>
 ```
 
-Chasing uses OpenAlex for each seed's references and citing papers, falling back to Semantic Scholar and then Europe PMC if one is unreachable or busy, and always adds PubMed's similar articles (`--similar 20`), which find new papers nobody has cited yet. The Search log records which source answered for each seed; mention it if a fallback was used.
+Chasing uses OpenAlex for each seed's references and citing papers, falling back to Semantic Scholar, then Europe PMC, then PubMed's own reference and cited-by links if one is unreachable or busy, and always adds PubMed's similar articles (`--similar 20`), which find new papers nobody has cited yet. The Search log records which source answered for each seed; mention it if a fallback was used.
 
 ## 3. Screen (you)
 

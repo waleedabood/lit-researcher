@@ -213,12 +213,17 @@ class Http:
         agent = "refcheck/1.0 (reference checker)"
         self.session.headers["User-Agent"] = f"{agent} mailto:{email}" if email else agent
 
+    dead_hosts = set()  # hosts that failed every retry once (e.g. blocked by a sandbox proxy); skipped afterwards
+
     def get(self, url):
         """Returns (status, text). 200/404 responses are cached; network errors give status 0."""
         f = self.cache / (hashlib.sha1(url.encode()).hexdigest() + ".json")
         if f.exists():
             hit = json.loads(f.read_text())
             return hit["status"], hit["body"]
+        host = url.split("/")[2]
+        if host in Http.dead_hosts:
+            return 0, f"{host} unreachable earlier in this run"
         status, body = 0, ""
         for attempt in range(3):
             try:
@@ -233,6 +238,8 @@ class Http:
                 if status == 429 and "openalex" in url:
                     break  # daily credit limit: retrying will not help; callers fall back to another source
             time.sleep(1 + 2 * attempt)
+        if status in (0, 403, 407, 502, 503):
+            Http.dead_hosts.add(host)
         return status, body
 
     def json(self, url):
@@ -472,6 +479,30 @@ def _jats_sentences(xml_text):
     return out
 
 
+def _ncbi_pmc_fulltext(http, doi):
+    """Open full text from PubMed Central via NCBI E-utilities (fallback when Europe PMC is blocked or empty)."""
+    eutils = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+    _, data = http.json(f"{eutils}/esearch.fcgi?db=pmc&retmode=json&retmax=20&term=" + quote(f'"{doi}"'))
+    ids = (data or {}).get("esearchresult", {}).get("idlist", [])
+    if not ids:
+        return None
+    # the DOI phrase also matches papers that cite it, so keep only the record whose own DOI is this one
+    _, data = http.json(f"{eutils}/esummary.fcgi?db=pmc&retmode=json&id=" + ",".join(ids))
+    res = (data or {}).get("result", {})
+    ids = [u for u in res.get("uids", []) if any(a.get("idtype") == "doi" and a.get("value", "").lower() == doi.lower()
+                                                 for a in res[u].get("articleids", []))]
+    if len(ids) != 1:
+        return None
+    status, body = http.get(f"{eutils}/efetch.fcgi?db=pmc&retmode=xml&id={ids[0]}")
+    if status != 200 or not body.strip():
+        return None
+    try:
+        sents = _jats_sentences(body)
+    except ET.ParseError:
+        return None
+    return ("fulltext", f"PubMed Central PMC{ids[0]}", sents) if len(sents) > 20 else None
+
+
 def fetch_source(http, ref, local_dir):
     """Best available text of the cited work: local file > PMC full text > abstract."""
     num = ref["num"]
@@ -507,6 +538,9 @@ def fetch_source(http, ref, local_dir):
                 sents = []
             if len(sents) > 20:
                 return "fulltext", f"Europe PMC {hit['pmcid']}", sents
+    pmc = _ncbi_pmc_fulltext(http, doi)
+    if pmc:
+        return pmc
     if hit.get("abstractText"):
         return "abstract", "Europe PMC abstract", sentences(strip_tags(hit["abstractText"]))
     if work.get("abstract"):

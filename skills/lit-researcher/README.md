@@ -25,8 +25,8 @@ Nothing factual reaches you unless code found it in a registry or in the paper's
 **Python 3:** already included when you use the skill in the Claude app. Only needed on your own computer if you run it in Claude Code (install from python.org). Packages install on first run, or with `pip install -r requirements.txt`.
 
 **Allowed websites** (Claude app): Settings → Capabilities → Create and edit files → Use the internet while making files → Allowed websites → Manage. Start a new chat after changing this.
-- Required: `eutils.ncbi.nlm.nih.gov`, `www.ebi.ac.uk`, `clinicaltrials.gov`, `api.crossref.org`
-- Recommended: `api.openalex.org`, `api.datacite.org`, `doi.org`
+- Required: `eutils.ncbi.nlm.nih.gov`, `clinicaltrials.gov`, `api.crossref.org`
+- Recommended: `www.ebi.ac.uk` (Europe PMC; without it, full text comes from PubMed Central via NCBI), `api.openalex.org`, `api.datacite.org`, `doi.org`
 - Optional: `api.semanticscholar.org`
 
 The skill runs `check_access.py` first and tells you exactly which sites are missing.

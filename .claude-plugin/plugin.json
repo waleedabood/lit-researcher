@@ -2,7 +2,7 @@
   "name": "lit-researcher",
   "displayName": "Lit Researcher",
   "description": "Reproducible, verified literature search for clinical questions: code searches PubMed, Europe PMC and ClinicalTrials.gov, copies every fact word for word from the source and checks every reference; Claude makes the judgment calls; you approve.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": {
     "name": "Waleed Abood, MD"
   },
