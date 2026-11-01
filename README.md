@@ -87,6 +87,24 @@ Code then applies one rule:
 
 The checklist has not been validated against human screening.
 
+## Which model to use
+
+**Start on Opus 5.5 at medium effort.** Where the skill can't start subagents on other models, every step runs on the model you started with, and extraction is where an error can reach you.
+
+Where it can, it uses these settings:
+
+| Step | Model | Effort |
+|---|---|---|
+| Question and search terms | The model you started with | As set |
+| Screening, first pass | Sonnet 5.5 | Low |
+| Screening, second look | Sonnet 5.5 | Medium |
+| Extraction | Opus 5.5 | Medium |
+| Reference check, in a fresh agent | Opus 5.5 | High |
+
+Fable 5.1 is used only if you ask for it.
+
+Most of these settings are untested starting points. Only first-pass screening has been compared across models, in one small test (50 papers on one question): Haiku 5.5, Sonnet 5.5 and Opus 5.5 all kept the 17 papers that had to survive, and neither Opus nor higher effort showed a gain. That test can't show Haiku is as safe as Sonnet.
+
 ## Limits
 
 - Facts come from open full text where available, otherwise from abstracts (flagged as "abstract only").
