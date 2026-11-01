@@ -100,7 +100,48 @@ Chasing uses OpenAlex for each seed's references and citing papers, falling back
 
 ## 3. Screen (you)
 
-For **every** record in `screening_list.json`, write `<dir>/screening_decisions.json` (template: `screening_decisions.template.json`): `{"id", "decision": "include|exclude|maybe", "reason", "note"}`. Exclusion reasons: `off_topic, wrong_population, wrong_design, no_relevant_outcome, not_primary_data, duplicate, not_retrievable, other`. Apply the protocol's rules, not your sense of what is interesting; when you bend a rule, say why in `note` so the user can overrule it. Watch for abbreviation collisions (e.g. a drug name matching a place name).
+Answer the same four-part checklist for **every** record in `screening_list.json`. You answer; code decides. Write `<dir>/screening_decisions.json` (template: `screening_decisions.template.json`), one row per record: `{"id", "check": "YYUN", "note"}`. `check` is four letters, in this order:
+
+1. **Population:** the protocol's population or setting.
+2. **Intervention:** the protocol's intervention, exposure or test.
+3. **Outcome:** reports an outcome that could answer a sub-question.
+4. **Design:** a study design the protocol allows, including its rules on reviews and letters.
+
+- `Y`: the title or abstract says so.
+- `N`: the title or abstract clearly rules it out.
+- `U`: it doesn't say, or there is no abstract. A relevant outcome that is named without a result is still `Y`. When unsure between `N` and `U`, choose `U`: a wrong `N` loses the paper for good, a wrong `U` only costs a second look.
+
+Apply the protocol's rules, not your sense of what is interesting. Keep `note` empty, or under 10 words when it helps the user overrule you. Watch for abbreviation collisions (e.g. a drug name matching a place name). Some cases sit outside the checklist: for a true duplicate or a record with nothing to retrieve, write `"reason": "duplicate"` or `"reason": "not_retrievable"` in place of `check`. For any other protocol rule the checklist doesn't cover, such as a cut-off month, write `"reason": "other"` and say why in `note`. Code excludes papers outside the protocol's years itself. For a review or other secondary paper excluded on Design, you may add `"reason": "not_primary_data"`. Don't judge cohort overlap here; it can't be seen one paper at a time. Say so in the fact's `note` at step 5 if two included papers seem to share patients.
+
+To screen with subagents, give each one file from `<dir>/screening_batches/` (`batch_01.txt`, …; 50 records each, already trimmed to what screening needs), the protocol's include and exclude rules, and this checklist, and have it write `screening_batches/batch_01.json` with the rows above. `screen` merges them when `screening_decisions.json` doesn't exist yet.
+
+```bash
+python3 <skill-dir>/scripts/litsearch.py screen <dir>
+```
+
+Code applies one rule: any `N` is exclude, otherwise any `U` is maybe, all `Y` is include. It fills in `decision` and `reason`, and stops with `PROBLEM` lines if a record is missing or malformed. It also prints each criterion's counts; if nearly every paper is unclear on the same criterion, that criterion is badly matched to the protocol, so tell the user.
+
+Then take a second look at the maybes:
+
+```bash
+python3 <skill-dir>/scripts/litsearch.py retrieve <dir> --maybes
+```
+
+For each paper in `maybe_candidates.json` (only those with full text), read its candidate sentences, change the `check` letters in `screening_decisions.json` that the full text settles, and rerun `screen`. Grep its `source_file` if the candidates don't settle it. Papers with no full text stay maybe, because they have nothing more to show. Maybes are not extracted; list what remains in the reply so the user can decide or supply PDFs.
+
+## Model and thinking level
+
+Use these where you can choose, such as when starting subagents; otherwise stay on the current model and say so once. First-pass screening had one small test (50 papers on one question): Haiku 5.5 low, Sonnet 5.5 low and medium, and Opus 5.5 low all kept the 17 papers that had to survive, so Opus and higher effort showed no gain there. It could not show Haiku is as safe as Sonnet. The other rows are untested starting defaults.
+
+| Step | Model | Effort | Why |
+|---|---|---|---|
+| 1. Question and concepts | Current session model | As set | Few tokens, and the user reviews it |
+| 3. Screening, first pass | Sonnet 5.5 | Low | Most tokens are here, and each answer is simple |
+| 3. Screening, second look | Sonnet 5.5 | Medium | The paper is already in doubt, so this one is harder |
+| 5. Extraction | Opus 5.5 | Medium | An error here can reach the reader |
+| 7. Ref-check | Opus 5.5, in a new subagent that did not do step 5 | High | It only counts as a second pass if it starts fresh |
+
+Use Fable 5.1 only if the user asks. Screening in subagents also keeps hundreds of abstracts out of the main conversation, where they would be carried through every later step.
 
 ## 4. Retrieve (code)
 
@@ -166,7 +207,7 @@ Reply with, in this order:
 1. The workbook file, `references.ris` (for Zotero/EndNote/Mendeley: File → Import), and the review page (the artifact, or `review.html` as a download).
 2. Flow counts: records found → screened → included → facts verified → ref-check verdicts.
 3. The bottom line per sub-question in 1–3 sentences, using only verified facts with their E-numbers and reference numbers. Say plainly when evidence is thin, retrospective, abstract-only or absent; an empty answer is a finding.
-4. Flags: retracted / concern / preprint / letter papers, abstract-only papers carrying key facts, internal inconsistencies in sources, judgment calls the user may want to overrule.
+4. Flags: retracted / concern / preprint / letter papers, abstract-only papers carrying key facts, papers still marked maybe and why, internal inconsistencies in sources, judgment calls the user may want to overrule.
 5. The contents of `facts_summary.md`, **pasted exactly as written**. It is built by code: each sub-question's full text as a heading; under it, each fact as the inline LLM verdict (✅ supports · 🟡 partial · ❌ contradicts · ⚠️ not found), E-number, reference number and **LLM fact**, followed by the **Exact extract** copied from the paper; then a reference key. Don't shorten, reorder or retype it: the point is that the user sees code-copied source text, not a paraphrase.
 
 ## 10. Exact-extract paragraph (code only, on request)

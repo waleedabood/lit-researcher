@@ -4,8 +4,10 @@
   check     DIR            before searching: PubMed hit counts for the draft concepts + rubric total and verdict
   search    DIR            run the approved protocol on PubMed, Europe PMC and ClinicalTrials.gov (logged)
   chase     DIR --seeds    add references, citing papers (OpenAlex > Semantic Scholar > Europe PMC) and PubMed similar articles
-  rank      DIR            rank all records against the question; write the screening list
+  rank      DIR            rank all records against the question; write the screening list and batches
+  screen    DIR            turn each paper's checklist into its decision and reason; check every record has one
   retrieve  DIR            fetch text of included records; shortlist sentences per sub-question
+                           (--maybes: fetch the "maybe" records instead, for a second look at their full text)
   verify    DIR            check the LLM's evidence picks: sentence exists verbatim, every number in it
   facts     DIR            write facts.md: one sentence per verified fact + registry-built references, for refcheck.py
   paragraph DIR            exact_extracts_paragraph.txt: the verified source sentences as one paragraph, checked by code
@@ -37,6 +39,10 @@ EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 EPMC = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 REASONS = ["off_topic", "wrong_population", "wrong_design", "no_relevant_outcome", "not_primary_data",
            "duplicate", "not_retrievable", "other"]
+CRITERIA = [("Population", "wrong_population"), ("Intervention", "off_topic"), ("Outcome", "no_relevant_outcome"),
+            ("Design", "wrong_design")]  # one letter each in a decision's "check", in this order
+NOT_CHECKLIST = ("duplicate", "not_retrievable", "other")  # exclusions the checklist cannot express
+SCREEN_BATCH = 50
 FIELDS = ["fact", "design", "n", "population", "comparison", "result"]
 NUMBER_FIELDS = ["n", "result"]          # numbers must be in the evidence sentence itself
 CONTEXT_FIELDS = ["fact", "population", "comparison"]  # numbers must be somewhere in the paper (e.g. "10-20 montage")
@@ -509,8 +515,9 @@ def cmd_rank(a):
     log = load(d, "search_log.json")
     log["ranked"] = {"records": len(ids), "screened": len(screen), "not_screened_low_rank": max(0, len(ids) - cap)}
     save(d, "search_log.json", log)
-    tmpl = [{"id": s["id"], "decision": "", "reason": "", "note": ""} for s in screen]
+    tmpl = [{"id": s["id"], "check": "", "note": ""} for s in screen]
     save(d, "screening_decisions.template.json", tmpl)
+    write_batches(d, screen)
     chased = [i for i in ids if any(f.startswith(("cited by", "cites", "similar to")) for f in records[i]["found_by"])]
     in_screen = sum(1 for s in screen if s["id"] in chased)
     log["ranked"]["chased_in_screening"] = in_screen
@@ -520,6 +527,64 @@ def cmd_rank(a):
         print(f"WARNING: only {in_screen} of {len(chased)} citation-chased records reached the screening list. "
               f"Many have no abstract in OpenAlex, so they rank low; raise max_screen or screen them by title.",
               file=sys.stderr)
+
+
+def write_batches(d, screen):
+    """screening_batches/batch_NN.txt: only what screening needs, so a batch can go to a separate worker."""
+    folder = d / "screening_batches"
+    folder.mkdir(exist_ok=True)
+    for old in list(folder.glob("batch_*.txt")) + list(folder.glob("batch_*.json")):
+        old.unlink()
+    for n in range(0, len(screen), SCREEN_BATCH):
+        parts = [f"[{s['id']}] {s['title']} ({s['year']}; {'; '.join(s['pub_types'][:2])})\n{s['abstract'] or 'NO ABSTRACT'}"
+                 for s in screen[n:n + SCREEN_BATCH]]
+        (folder / f"batch_{n // SCREEN_BATCH + 1:02d}.txt").write_text("\n\n".join(parts))
+
+
+def cmd_screen(a):
+    """The LLM answers the checklist; code applies the rule: any N excludes, otherwise any U is maybe, all Y includes."""
+    d = Path(a.dir)
+    if (d / "screening_decisions.json").exists():
+        rows = load(d, "screening_decisions.json")
+    else:
+        rows = [x for f in sorted((d / "screening_batches").glob("batch_*.json")) for x in json.loads(f.read_text())]
+    screen = load(d, "screening_list.json")
+    want = [s["id"] for s in screen]
+    seen = Counter(x.get("id") for x in rows)
+    y0, y1 = ((load(d, "protocol.json").get("years") if (d / "protocol.json").exists() else None) or [None, None])[:2]
+    year = {s["id"]: s.get("year") for s in screen}
+    problems = [f"no decision for {i}" for i in want if not seen[i]]
+    problems += [f"{i} appears {n} times" for i, n in seen.items() if n > 1]
+    problems += [f"{i} is not in screening_list.json" for i in seen if i not in set(want)]
+    for x in rows:
+        y = year.get(x.get("id"))
+        if y and ((y0 and y < y0) or (y1 and y > y1)):  # chased papers can fall outside the search's years
+            x.update(decision="exclude", reason="other", note=f"Published {y}, outside the protocol's years")
+            continue
+        if x.get("reason") in NOT_CHECKLIST:
+            x["decision"] = "exclude"
+            continue
+        c = str(x.get("check", "")).upper()
+        if not re.fullmatch(r"[YNU]{4}", c):
+            problems.append(f"{x.get('id')}: check must be 4 letters of Y, N or U, got {c!r}")
+            continue
+        x["check"] = c
+        x.setdefault("first_check", c)
+        reasons = [r for (_, r), v in zip(CRITERIA, c) if v == "N"]
+        keep = x.get("reason") == "not_primary_data" and c[3] == "N"
+        x["reason"] = "not_primary_data" if keep else "off_topic" if "off_topic" in reasons else reasons[0] if reasons else ""
+        x["decision"] = "exclude" if reasons else "maybe" if "U" in c else "include"
+    if problems:
+        print("\n".join(f"PROBLEM {p}" for p in problems[:40]), file=sys.stderr)
+        print(f"{len(problems)} problems; nothing saved", file=sys.stderr)
+        return 1
+    save(d, "screening_decisions.json", rows)
+    counts = Counter(x["decision"] for x in rows)
+    print(f"{counts['include']} include, {counts['maybe']} maybe, {counts['exclude']} exclude", file=sys.stderr)
+    for n, (name, _) in enumerate(CRITERIA):
+        col = [x["check"][n] for x in rows if x.get("check")]
+        print(f"  {name}: {col.count('N')} no, {col.count('U')} unclear", file=sys.stderr)
+    return 0
 
 
 # ---------------------------------------------------------------- retrieval and evidence shortlist
@@ -539,7 +604,9 @@ def cmd_retrieve(a):
     (d / "sources").mkdir(exist_ok=True)
     p, records, http = load(d, "protocol.json"), load(d, "records.json"), http_for(d)
     out = []
-    for rid in included_ids(d):
+    include = included_ids(d)
+    ids = [x["id"] for x in load(d, "screening_decisions.json") if x["decision"] == "maybe"] if a.maybes else include
+    for rid in ids:
         r = records[rid]
         if r["journal"].startswith("ClinicalTrials.gov"):
             level, origin, sents = "registry", r["journal"], sentences(r["abstract"])
@@ -574,6 +641,12 @@ def cmd_retrieve(a):
                     "source_file": f"sources/{safe(rid)}.txt", "candidates": cands})
         print(f"  {rid}: {level} ({len(sents)} sentences)", file=sys.stderr)
     save(d, "records.json", records)
+    if a.maybes:
+        full = [c for c in out if c["level"] == "fulltext"]
+        save(d, "maybe_candidates.json", full)
+        print(f"{len(full)} of {len(out)} maybe papers have full text -> maybe_candidates.json; "
+              f"the other {len(out) - len(full)} add nothing to the abstract and stay maybe", file=sys.stderr)
+        return
     save(d, "evidence_candidates.json", out)
     tmpl = [{"id": "E1", "paper_id": out[0]["paper_id"] if out else "", "subq": "Q1", "anchor": "",
              **{f: "" for f in FIELDS}, "note": ""}]
@@ -1008,20 +1081,27 @@ def cmd_workbook(a):
     ws.add_data_validation(dv)
     dv.add(f"U2:U{ws.max_row + 200}")
 
+    def answers(rid):
+        """One Yes/No/Unclear per checklist criterion; blank for runs screened before the checklist existed."""
+        c = (decisions.get(rid) or {}).get("check", "")
+        return [{"Y": "Yes", "N": "No", "U": "Unclear"}[v] for v in c] if c else [""] * len(CRITERIA)
+
     ws = wb.create_sheet("Screening")
     sheet(ws, ["Rank", "Record", "Year", "Journal", "Type", "Found by", "Relevance score", "Title",
-               "LLM decision", "LLM reason", "LLM note", "Your decision", "Your comment", "Abstract (copied by code)"],
-          ["code"] * 8 + ["llm"] * 3 + ["you"] * 2 + ["code"],
-          [6, 16, 6, 20, 18, 20, 9, 60, 12, 18, 30, 14, 26, 80],
+               "LLM decision", *[name for name, _ in CRITERIA], "First pass", "LLM reason", "LLM note",
+               "Your decision", "Your comment", "Abstract (copied by code)"],
+          ["code"] * 8 + ["code"] + ["llm"] * (len(CRITERIA) + 1) + ["code", "llm"] + ["you"] * 2 + ["code"],
+          [6, 16, 6, 20, 18, 20, 9, 60, 12, 11, 11, 11, 11, 9, 18, 30, 14, 26, 80],
           [[s["rank"], s["id"], s["year"], s["journal"], "; ".join(s["pub_types"][:2]), "; ".join(s["found_by"]),
-            s["score"], s["title"], (decisions.get(s["id"]) or {}).get("decision", ""),
+            s["score"], s["title"], (decisions.get(s["id"]) or {}).get("decision", ""), *answers(s["id"]),
+            (decisions.get(s["id"]) or {}).get("first_check", ""),
             (decisions.get(s["id"]) or {}).get("reason", ""), (decisions.get(s["id"]) or {}).get("note", ""),
             *kept["Screening"].get(s["id"], (None, None)), (records.get(s["id"]) or {}).get("abstract", "")]
            for s in screen])
     color(ws, "I", ws.max_row, {"include": "E2EFDA", "maybe": "FFF2CC", "exclude": "EDEDED"})
     dv = DataValidation(type="list", formula1='"Include,Exclude,Maybe"', allow_blank=True)
     ws.add_data_validation(dv)
-    dv.add(f"L2:L{ws.max_row + 200}")
+    dv.add(f"Q2:Q{ws.max_row + 200}")
 
     ws = wb.create_sheet("All records")
     ids = list(records)
@@ -1168,7 +1248,7 @@ def main():
     imp = sub.add_parser("import-edits")
     imp.add_argument("dir")
     imp.add_argument("file", help="JSON from the review artifact's reviews/<dir name>/edits collection (ArtifactData list)")
-    for name in ("check", "search", "rank", "retrieve", "verify", "facts", "summary", "paragraph", "draft", "workbook", "chase", "queries", "ris"):
+    for name in ("check", "search", "rank", "screen", "retrieve", "verify", "facts", "summary", "paragraph", "draft", "workbook", "chase", "queries", "ris"):
         s = sub.add_parser(name)
         s.add_argument("dir")
         if name == "chase":
@@ -1180,6 +1260,7 @@ def main():
         if name == "retrieve":
             s.add_argument("--sources", help="folder of PDFs you have, named by record id (e.g. PMID_123.pdf)")
             s.add_argument("--top", type=int, default=5, help="candidate sentences per sub-question")
+            s.add_argument("--maybes", action="store_true", help="fetch the maybe records -> maybe_candidates.json")
         if name == "summary":
             s.add_argument("--full", action="store_true", help="long form with the exact source sentence for each fact")
         if name in ("verify", "draft"):
@@ -1188,7 +1269,7 @@ def main():
     if a.cmd == "queries":
         print(json.dumps(build_queries(load(a.dir, "protocol.json")), indent=1))
         return
-    sys.exit({"import-edits": cmd_import_edits, "check": cmd_check, "search": cmd_search, "chase": cmd_chase, "rank": cmd_rank, "retrieve": cmd_retrieve,
+    sys.exit({"import-edits": cmd_import_edits, "check": cmd_check, "search": cmd_search, "chase": cmd_chase, "rank": cmd_rank, "screen": cmd_screen, "retrieve": cmd_retrieve,
               "verify": cmd_verify, "facts": cmd_facts, "summary": cmd_summary, "paragraph": cmd_paragraph, "draft": cmd_draft, "workbook": cmd_workbook, "ris": cmd_ris}[a.cmd](a) or 0)
 
 
