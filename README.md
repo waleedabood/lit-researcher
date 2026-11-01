@@ -1,5 +1,7 @@
 # lit-researcher
 
+[![Latest release](https://img.shields.io/github/v/release/waleedabood/lit-researcher)](https://github.com/waleedabood/lit-researcher/releases/latest)
+
 A Claude skill for reproducible, verified literature searches on clinical and biomedical questions.
 
 **Code does everything factual. The LLM makes the judgment calls. You approve.**
