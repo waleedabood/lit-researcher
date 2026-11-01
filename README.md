@@ -14,7 +14,17 @@ Nothing factual reaches you unless code found it in a registry or in the paper's
 
 ## Install
 
-**Claude app (claude.ai, desktop, mobile):** add *Lit Researcher* from the directory (Customize → Skills → Browse), or download `lit-researcher.zip` from the Releases page and upload it under Customize → Skills → **+** → Create skill → Upload a skill.
+**Claude app (paid plans):**
+
+1. Go to Customize → Plugins → Add → Add marketplace.
+2. Under "Add from a repository", paste `waleedabood/lit-researcher`.
+3. Install *Lit Researcher*.
+
+Plugins added this way also work in Cowork and in Claude Code when you sign in with the same account.
+
+**Or upload the zip:** download [`lit-researcher.zip`](https://github.com/waleedabood/lit-researcher/releases/latest/download/lit-researcher.zip), then go to Customize → Skills → **+** → Create skill → Upload a skill.
+
+**Claude directory:** Lit Researcher is under review and not listed yet.
 
 **Claude Code:**
 
@@ -24,7 +34,7 @@ Nothing factual reaches you unless code found it in a registry or in the paper's
 
 **Python 3:** already included when you use the skill in the Claude app. Only needed on your own computer if you run it in Claude Code (install from python.org). Packages install on first run, or with `pip install -r skills/lit-researcher/requirements.txt`.
 
-**Allowed websites** (Claude app): Settings → Capabilities → Create and edit files → Use the internet while making files → Allowed websites → Manage. Start a new chat after changing this.
+**First run: allow the search sites** (Claude app). The literature sites aren't on Claude's default allowed list, so you may need to add them once: Settings → Capabilities → Create and edit files → Use the internet while making files → Allowed websites → Manage. Start a new chat after changing this.
 - Required: `eutils.ncbi.nlm.nih.gov`, `clinicaltrials.gov`, `api.crossref.org`
 - Recommended: `www.ebi.ac.uk` (Europe PMC; without it, full text comes from PubMed Central via NCBI), `api.openalex.org`, `api.datacite.org`, `doi.org`
 - Optional: `api.semanticscholar.org`
