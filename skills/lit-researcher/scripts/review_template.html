@@ -55,7 +55,7 @@
   .list-row { cursor: pointer; scroll-margin-top: 36px; }
   .list-row:hover { background: var(--bg); }
   .list-row.sel { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
-  .cell { min-width: 0; }
+  .cell { min-width: 0; overflow-wrap: anywhere; }
   .nowrap .cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .count { padding: 6px 10px; font-size: 12px; color: var(--muted); }
   #detail { overflow: auto; padding: 18px 24px 60px; }
@@ -151,7 +151,7 @@ const store = {
 const SHEETS = ['Evidence', 'Screening', 'All records', 'Search log', 'Protocol', 'References'];
 const DEFAULTS = {
   'Evidence': { list: ['E#', 'Paper', 'Your verdict'], view: ['Paper', 'LLM fact', 'Evidence sentence', 'Numbers from elsewhere', 'Abstract'] },
-  'Screening': { list: ['Rank', 'Title', 'Your decision'], view: ['Title', 'Year', 'Journal', 'Type', 'LLM decision', 'Population', 'Intervention', 'Outcome', 'Design', 'LLM reason', 'LLM note', 'Abstract'] },
+  'Screening': { list: ['Rank', 'Title', 'LLM decision', 'Your decision'], view: ['Title', 'Year', 'Journal', 'Type', 'LLM decision', 'Population', 'Intervention', 'Outcome', 'Design', 'LLM reason', 'LLM note', 'Abstract'] },
   'All records': { list: ['Rank', 'Title', 'Status'], view: ['Title', 'First author', 'Year', 'Journal', 'Type', 'Found by', 'DOI', 'Status'] },
 };
 const TONES = { 'Accepted': 'ok', 'Include': 'ok', 'Screen it': 'ok', 'Partly correct': 'part', 'Maybe': 'part', 'Rejected': 'bad', 'Exclude': 'bad' };
