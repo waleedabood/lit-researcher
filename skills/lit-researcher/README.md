@@ -89,5 +89,6 @@ The checklist has not been validated against human screening.
 
 - Facts come from open full text where available, otherwise from abstracts (flagged as "abstract only").
 - Screening and sentence choice are LLM judgments; review them. The workbook shows every paper's checklist answers, decision and reason.
+- Code confirms each number is in the source, not that it describes the right group. Numbers taken from outside the quoted sentence are listed with where they were found. A bare "one" isn't checked, because it's often a pronoun.
 - Papers without a DOI (often older journals) are verified against PubMed. The second-pass reference check reads their PubMed abstract, so it has no source text only when there is no PMID or no abstract.
 - Not a substitute for a formal systematic review protocol (dual independent screening, risk-of-bias assessment).

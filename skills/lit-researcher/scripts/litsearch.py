@@ -44,8 +44,8 @@ CRITERIA = [("Population", "wrong_population"), ("Intervention", "off_topic"), (
 NOT_CHECKLIST = ("duplicate", "not_retrievable", "other")  # exclusions the checklist cannot express
 SCREEN_BATCH = 50
 FIELDS = ["fact", "design", "n", "population", "comparison", "result"]
-NUMBER_FIELDS = ["n", "result"]          # numbers must be in the evidence sentence itself
-CONTEXT_FIELDS = ["fact", "population", "comparison"]  # numbers must be somewhere in the paper (e.g. "10-20 montage")
+NUMBER_FIELDS = ["result"]                # numbers must be in the evidence sentence itself
+CONTEXT_FIELDS = ["n", "fact", "population", "comparison"]  # numbers must be somewhere in the paper (e.g. "10-20 montage")
 
 
 def load(d, name, default=None):
@@ -659,13 +659,57 @@ def cmd_retrieve(a):
 _NUM = re.compile(r"(?<![A-Za-z])\d+(?:[.,]\d+)*")
 
 
-def numbers(text):
-    """Numbers as written, with thousands separators removed: '51,454' -> '51454', '0.85' -> '0.85'."""
-    out = set()
-    for m in _NUM.findall(clean(text or "")):
-        v = m.replace(",", "") if re.fullmatch(r"\d{1,3}(?:,\d{3})+", m) else m.replace(",", ".")
-        out.add(v.lstrip("0") or "0" if "." not in v else v)
-    return out
+_UNITS = {w: i + 1 for i, w in enumerate("one two three four five six seven eight nine".split())}
+_TEENS = {w: i + 10 for i, w in enumerate("ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split())}
+_TENS = {w: (i + 2) * 10 for i, w in enumerate("twenty thirty forty fifty sixty seventy eighty ninety".split())}
+_U, _T = "|".join(_UNITS), "|".join(_TENS)
+_BELOW_100 = rf"(?:(?:{_T})(?:[- ](?:{_U}))?|{'|'.join(_TEENS)}|{_U})"
+_WORDS = re.compile(rf"\b(?:(?:a|{_U})[- ]hundred(?:(?: and | |-){_BELOW_100})?|{_BELOW_100}|zero)\b"
+                    r"(?!-(?:thirds?|quarters?|fifths?|sided|tailed|dimensional|way)\b)", re.I)
+_PERCENT = re.compile(rf"({_NUM.pattern}(?:\s*(?:-|–|—|to)\s*{_NUM.pattern})*)\s*(?:%|per ?cent\b)", re.I)
+
+
+def _word_value(m):
+    total = 0
+    for w in re.split(r"[- ]", m.group().lower()):
+        if w == "hundred":
+            total *= 100
+        elif w == "a":
+            total = 1
+        elif w != "and":
+            total += {**_UNITS, **_TEENS, **_TENS, "zero": 0}[w]
+    return str(total)
+
+
+def as_digits(text, one=True):
+    """'Twenty-nine of seven' -> '29 of 7'. one=False leaves a bare 'one', which is often a pronoun, unconverted."""
+    return _WORDS.sub(lambda m: _word_value(m) if one or m.group().lower() != "one" else m.group(), clean(text or ""))
+
+
+def _normal(m):
+    v = m.replace(",", "") if re.fullmatch(r"\d{1,3}(?:,\d{3})+", m) else m.replace(",", ".")
+    return v.lstrip("0") or "0" if "." not in v else v
+
+
+def numbers(text, one=True):
+    """Numbers as written or in words, with thousands separators removed: '51,454' -> '51454', 'Seven' -> '7'."""
+    return {_normal(m) for m in _NUM.findall(as_digits(text, one))}
+
+
+def percents(text, one=True):
+    """The numbers written as percentages: '29%', 'twenty-nine percent' and '20-29%' all count 29."""
+    return {_normal(n) for m in _PERCENT.finditer(as_digits(text, one)) for n in _NUM.findall(m.group(1))}
+
+
+def found_elsewhere(values, pct, sentences, title):
+    """Where each number that isn't in the chosen sentence was found, so the reader can see if it's the same thing.
+    A number the fact gives as a percentage is shown from a sentence that also gives it as one."""
+    out = []
+    for v in sorted(values, key=lambda x: (len(x), x)):
+        hits = [i for i, s in enumerate(sentences) if v in numbers(s)]
+        sid = next((i for i in hits if v in pct and v in percents(sentences[i])), hits[0] if hits else None)
+        out.append(f"{v}: {'title' if sid is None else f's{sid}: {sentences[sid][:120]}'}")
+    return " | ".join(out)
 
 
 def cmd_verify(a):
@@ -677,7 +721,7 @@ def cmd_verify(a):
     for e in load(d, "extractions.json"):
         rid = e.get("paper_id", "")
         row = {**{k: e.get(k, "") for k in ["id", "paper_id", "subq", "anchor", *FIELDS, "note"]},
-               "sentence": "", "sid": "", "match": "", "status": ""}
+               "sentence": "", "sid": "", "match": "", "status": "", "numbers_elsewhere": ""}
         if rid not in included:
             row["status"] = "paper not included"
         elif e.get("subq") not in subq:
@@ -694,11 +738,16 @@ def cmd_verify(a):
                 row["status"] = "quote not found"
             else:
                 row.update(sentence=text, sid=f"s{sid}")
-                missing = sorted(set().union(*(numbers(e.get(f, "")) for f in NUMBER_FIELDS)) - numbers(text))
-                paper = numbers(" ".join(src) + " " + records[rid]["title"])
-                elsewhere = sorted(set().union(*(numbers(e.get(f, "")) for f in CONTEXT_FIELDS)) - paper)
+                result, context = (" ".join(e.get(f, "") for f in fs) for fs in (NUMBER_FIELDS, CONTEXT_FIELDS))
+                whole = " ".join(src) + " " + records[rid]["title"]
+                missing = sorted(numbers(result, one=False) - numbers(text))
+                absent = sorted(numbers(context, one=False) - numbers(whole))
+                not_pct = sorted((percents(result, one=False) - percents(text)) | (percents(context, one=False) - percents(whole)))
                 row["status"] = (f"numbers not in sentence: {', '.join(missing)}" if missing else
-                                 f"numbers not in the paper: {', '.join(elsewhere)}" if elsewhere else "verified")
+                                 f"numbers not in the paper: {', '.join(absent)}" if absent else
+                                 f"numbers not given as percentages in the source: {', '.join(not_pct)}" if not_pct else "verified")
+                row["numbers_elsewhere"] = found_elsewhere(numbers(context, one=False) - numbers(text) - set(absent),
+                                                           percents(context, one=False), src, records[rid]["title"])
         if row["status"] != "verified":
             problems.append(f"{row['id']} ({rid}): {row['status']}")
         rows.append(row)
@@ -1053,10 +1102,10 @@ def cmd_workbook(a):
                ABSTRACT_HEADER,
                "Check", "LLM fact", "Design", "n", "Population", "Comparison", "Result", "LLM note", "In fact list",
                "Ref-check: reference", "Ref-check: suggested verdict", "Ref-check: note", "Your verdict", "Your comment",
-               "Your edited fact"],
+               "Your edited fact", "Numbers from elsewhere in the paper"],
           ["code", "llm", "llm", "code", "code", "code", "code", "code", "code", "llm", "llm", "llm", "llm", "llm", "llm",
-           "llm", "code", "code", "llm", "llm", "you", "you", "you"],
-          [6, 30, 40, 6, 18, 12, 60, 70, 18, 50, 16, 8, 24, 20, 36, 30, 8, 18, 16, 30, 16, 26, 40],
+           "llm", "code", "code", "llm", "llm", "you", "you", "you", "code"],
+          [6, 30, 40, 6, 18, 12, 60, 70, 18, 50, 16, 8, 24, 20, 36, 30, 8, 18, 16, 30, 16, 26, 40, 70],
           [[e["id"], f"{e['subq']}: {subq.get(e['subq'], '')}",
             f"{records[e['paper_id']]['first_author']} {records[e['paper_id']]['year']}. {records[e['paper_id']]['title']}"
             if e["paper_id"] in records else e["paper_id"],
@@ -1066,7 +1115,7 @@ def cmd_workbook(a):
             *[e[f] for f in FIELDS], e["note"], "Yes" if e["paper_id"] in cited else "No",
             rc_status.get((rc_refs.get((rc_by_eid.get(e["id"]) or {}).get("ref")) or {}).get("status"), ""),
             rc_verdict.get((rc_by_eid.get(e["id"]) or {}).get("verdict"), ""), (rc_by_eid.get(e["id"]) or {}).get("note", ""),
-            *kept["Evidence"].get(str(e["id"]), (None, None, None))]
+            *kept["Evidence"].get(str(e["id"]), (None, None, None)), e.get("numbers_elsewhere", "")]
            for e in evidence])
     for n, e in enumerate(evidence, 2):
         ws.cell(n, 8).value = abstract_cell((records.get(e["paper_id"]) or {}).get("abstract", ""), e["sentence"])

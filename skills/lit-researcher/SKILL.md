@@ -159,14 +159,15 @@ Write `<dir>/extractions.json` (template: `extractions.template.json`), one row 
 
 - **Choose the sentence** that best answers the sub-question, anywhere in the source. `anchor` is 6–15 consecutive words copied character-for-character from it; code copies the whole sentence into the table, so the user always sees the paper's own words.
 - **`fact`** is what the user reads first: one complete, plain-language sentence that stands on its own. Start with the population and its size, name the drug or test, give the result with numbers and units, and the comparison or time point if the source has one. Spell out abbreviations; keep the source's hedges; for mixed cohorts say so ("In 41 patients with DEE, 33 of them with LGS, …"). Example: "In 36 children and adults with LGS, cenobamate reduced seizure frequency in 31 (86%); 22 (61%) had a ≥75% reduction and five (14%) became seizure-free."
-- **Numbers are checked by code:** every number in `n` and `result` must appear in the chosen sentence, written as digits the way the sentence writes them; numbers in `fact`, `population` and `comparison` must appear somewhere in the paper. Do not add numbers up or convert them (4 + 9 is not "13" unless the paper says 13). If numbers are spread over two sentences, make two rows.
+- **Numbers are checked by code:** every number in `result` must appear in the chosen sentence. Numbers in `n`, `fact`, `population` and `comparison` must appear somewhere in the paper, and any that aren't in the chosen sentence are listed with where code found them, so the user can see whether it's the same thing. Digits and words count as the same number ("Seven" matches "7"), except a bare "one", which isn't checked because it's often a pronoun. A number written as a percentage must also be a percentage in the source. Do not add numbers up or convert them (4 + 9 is not "13" unless the paper says 13). If numbers in `result` are spread over two sentences, make two rows.
+- **`n`** is the size of the group this result describes, whichever sentence gives it. Fill it in whenever the paper states it.
 - `result` says what was measured, never a bare number or only a sample size. `note`: abstract-only, flags, caveats.
 
 ```bash
 python3 <skill-dir>/scripts/litsearch.py verify <dir>
 ```
 
-For each `PROBLEM`, fix the anchor or the wording from the source and rerun. Never change a number to something the source does not say; drop a row rather than force it.
+`verify` confirms a number is in the source, not that it describes the right group, so check the sentence and group yourself. For each `PROBLEM`, fix the anchor or the wording from the source and rerun. Never change a number to something the source does not say; drop a row rather than force it.
 
 ## 6. Fact list (code)
 
@@ -186,7 +187,7 @@ Follow `references/ref-check.md` on `facts.md` with `--out <dir>/refcheck` (dele
 python3 <skill-dir>/scripts/litsearch.py workbook <dir>
 ```
 
-`lit_review.xlsx` opens on **Evidence**: one row per fact with the paper, flags, full text vs abstract, the exact source sentence, the LLM fact and fields, the ref-check result, and the user's **Your verdict** column; then Screening (with **Your decision**), All records (every de-duplicated record with its status, including those ranked too low to screen, and a **Your decision** column), Search log (queries, hits, flow counts, exclusion reasons), Protocol (with the question check) and References. The same command also writes `references.ris` (every included paper with title, authors, journal, DOI and PubMed links, abstract, and the verified source sentences as notes), which imports into Zotero, EndNote or Mendeley in one step (File → Import). Give the user the workbook and `references.ris` as downloadable files (in Claude apps, copy it to the outputs folder, e.g. `/mnt/user-data/outputs/`, or use the file-presenting tool).
+`lit_review.xlsx` opens on **Evidence**: one row per fact with the paper, flags, full text vs abstract, the exact source sentence, the LLM fact and fields, the ref-check result, the user's **Your verdict** column, and any numbers code found outside that sentence; then Screening (with **Your decision**), All records (every de-duplicated record with its status, including those ranked too low to screen, and a **Your decision** column), Search log (queries, hits, flow counts, exclusion reasons), Protocol (with the question check) and References. The same command also writes `references.ris` (every included paper with title, authors, journal, DOI and PubMed links, abstract, and the verified source sentences as notes), which imports into Zotero, EndNote or Mendeley in one step (File → Import). Give the user the workbook and `references.ris` as downloadable files (in Claude apps, copy it to the outputs folder, e.g. `/mnt/user-data/outputs/`, or use the file-presenting tool).
 
 The same command writes two review pages from the workbook. Both have the list of rows on the left and the expanded view on the right (by default: paper, LLM fact, exact extract, and the whole abstract with the extract highlighted), a Fields menu, wrap/compact text, filters, and status buttons (Not reviewed / Accepted / Partly correct / Rejected) plus "Your comment" and "Your edited fact" boxes. Rebuilding the workbook keeps whatever the user has already entered in the "Your …" columns.
 
