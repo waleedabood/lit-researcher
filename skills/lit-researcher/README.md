@@ -57,9 +57,38 @@ Ask a clinical question, e.g. *"What is the recurrence risk after a first unprov
 2. The search, screening, retrieval and fact extraction run.
 3. You get `lit_review.xlsx`, a review page and `references.ris`. Mark each fact Accepted / Partly correct / Rejected, and import the .ris into your reference manager.
 
+## How papers are screened
+
+Every record gets the same four-part checklist, answered from its title and abstract. There is no numeric score.
+
+| Criterion | The question |
+|---|---|
+| Population | Is this the protocol's population or setting? |
+| Intervention | Is this the protocol's intervention, exposure or test? |
+| Outcome | Does it report an outcome that could answer a sub-question? |
+| Design | Is this a study design the protocol allows? |
+
+Claude answers each one **Yes** (the title or abstract says so), **No** (it clearly rules this out) or **Unclear** (it doesn't say, or there is no abstract). When torn between No and Unclear, it chooses Unclear, because a wrong No loses the paper for good.
+
+Code then applies one rule:
+
+| Answers | Decision |
+|---|---|
+| Any No | Exclude |
+| No "No", at least one Unclear | Maybe |
+| All Yes | Include |
+
+- **Maybes:** those with open full text get a second look, and the full text can settle their Unclear answers. The rest stay maybe and are listed for you. Maybes are not extracted.
+- **Date limits:** code excludes papers outside the protocol's years.
+- **Where you see it:** the Screening sheet in `lit_review.xlsx` and the review page show all four answers for every paper, and you can overrule any decision. `references.ris` holds included papers only, without the answers.
+- **Relevance score:** that workbook column is the search ranking, not this checklist.
+
+The checklist has not been validated against human screening.
+
 ## Limits
 
 - Facts come from open full text where available, otherwise from abstracts (flagged as "abstract only").
-- Screening and sentence choice are LLM judgments; review them. The workbook shows every decision with its reason.
+- Screening and sentence choice are LLM judgments; review them. The workbook shows every paper's checklist answers, decision and reason.
+- Code confirms each number is in the source, not that it describes the right group. Numbers taken from outside the quoted sentence are listed with where they were found. A bare "one" isn't checked, because it's often a pronoun.
 - Papers without a DOI (often older journals) are verified against PubMed. The second-pass reference check reads their PubMed abstract, so it has no source text only when there is no PMID or no abstract.
 - Not a substitute for a formal systematic review protocol (dual independent screening, risk-of-bias assessment).
