@@ -20,6 +20,26 @@ python3 <skill-dir>/scripts/check_access.py
 
 The scripts install any missing packages themselves on first run. If that fails, they print `MISSING PACKAGES`; show the user that line and stop. If OpenAlex shows LIMITED, carry on: citation chasing falls back to the next source; mention once that setting `OPENALEX_API_KEY` (free at openalex.org) or `OPENALEX_EMAIL` restores it. If the script exits with an error because sites are blocked, show the user its output as printed: the blocked domains, one per line (the Allowed websites list takes one site per entry), and the settings path (Settings → Capabilities → Create and edit files → Use the internet while making files → Allowed websites → Manage). Then stop; the search cannot work without them. If only the optional sites (Europe PMC, Semantic Scholar, DataCite, doi.org) are blocked, the script exits cleanly: carry on, and mention it once in the reply. Without Europe PMC the search runs on PubMed and ClinicalTrials.gov, and open full text comes from PubMed Central through NCBI instead; a host that fails once is skipped for the rest of the run, so a blocked site costs one timeout, not one per paper.
 
+## Study mode (study01)
+
+Only when the request starts with `study01`. It is for validation-study runs that are scored against a published systematic review, so the run must be the same every time and must not see the review. The request looks like:
+
+```
+study01 run=R01-A end=2026-03-15 question=<path to question file> block=<path to block file, or none>
+```
+
+Copy the question file and the block file into the work folder `lit/<run>/` (copy with a shell command; **never open, print or summarize the block file**: it names the benchmark review). Then follow the normal steps with these changes:
+
+1. **Question check (step 1):** score the question and write `refined_question` as usual (it is logged, not searched), but write `protocol.json` for the **original question exactly as written**, with `"mode": "study01"` and:
+   `"study": {"run_id": "<run>", "question_file": "question.txt", "search_end": "<end>", "block_file": "block.json" or "", "models": {"session": "<model>", "screening": "<model>", "extraction": "<model>", "refcheck": "<model>"}}`.
+   Fixed settings: `"reviews": "exclude"`, `"letters": "exclude"`, `"max_per_source": 200`, `"max_screen": 150`, `"years": [<start or null>, <end year>]`. Code refuses the run if the protocol question differs from the question file. Code does not look up existing systematic reviews in this mode.
+2. **No approval stop:** set `"approved": true` yourself and continue. Do not ask the user anything, do not propose changes when hits are few or many, and do not use "use original": the original is already used. Show `question_check.md` once, then go on.
+3. **Search to the day:** code limits every source to `search_end` (PubMed, Europe PMC, ClinicalTrials.gov first-posted date) and drops any record, including chased, citing and similar papers, published after it or on the block list. Papers citing the review come after it, so the date limit removes them too. Never choose a removed record as a seed.
+4. **Models:** use the models in the table below wherever you can choose them, and record the ones actually used in `study.models` (the same models for every run).
+5. Steps 2 to 8 run as usual (chase 3–5 seeds, screen, second look at maybes, retrieve, extract, verify, facts, ref-check, workbook). Leave every "Your …" column empty.
+6. **Export:** `workbook` also writes `study_export.csv` (every record with DOI, PMID, date, decision and where it stopped: include, maybe, exclude, not screened, removed after the search end date) and `run_summary.json` (flow counts, queries, seeds, models, settings, logged suggested question, and a sha256 of the skill's code to prove the frozen version). `python3 <skill-dir>/scripts/litsearch.py export <dir>` rebuilds them.
+7. **Reply:** only the files (workbook, `study_export.csv`, `run_summary.json`) and the flow counts. No bottom line, no synthesis. If a step fails for a technical reason, stop and say which step; don't retry with changed settings.
+
 ## 1. Question check and concepts, then stop for approval
 
 Before any search, score the user's question with the rubric in `references/question-rubric.md` (read it), so a vague question is fixed while that is cheap.

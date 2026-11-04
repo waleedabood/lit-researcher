@@ -16,11 +16,15 @@
   workbook  DIR            write lit_review.xlsx (Evidence, Screening, All records, Search log, Protocol, References),
                            review.html (offline review page) and review_artifact.html (to publish on claude.ai)
   import-edits DIR FILE    write review changes saved in the artifact into lit_review.xlsx
+  export    DIR            study_export.csv (every record: DOI, PMID, date, decision, where it stopped) + run_summary.json
+                           (study01 mode: see "study01 mode" below; the workbook command also writes these)
 
 DIR holds protocol.json (written by the LLM, approved by the user) and everything the stages produce.
 The LLM writes screening_decisions.json, extractions.json and draft.md; code checks all three.
 """
 import argparse
+import csv
+import hashlib
 import json
 import os
 import re
@@ -69,6 +73,116 @@ def safe(rid):
     return re.sub(r"[^A-Za-z0-9._-]", "_", rid)
 
 
+# ---------------------------------------------------------------- study01 mode (validation-study runs)
+#
+# protocol.json gets "mode": "study01" and a "study" block:
+#   {"run_id": "R01-A", "question_file": "question.txt", "search_end": "2026-03-15", "block_file": "block.json",
+#    "models": {"session": "...", "screening": "...", "extraction": "...", "refcheck": "..."}}
+# The search uses the original question exactly as written (the suggested question is only logged), runs only to
+# the review's search end date (to the day), never shows existing systematic reviews, and drops every record on the
+# sealed block list (the benchmark review and its protocol, by DOI or PMID) without printing it.
+
+STUDY_MODES = ("study01",)
+
+
+def study(p):
+    """The protocol's study block in study01 mode, else None."""
+    return (p.get("study") or {}) if p.get("mode") in STUDY_MODES else None
+
+
+def norm_q(text):
+    return " ".join(str(text or "").split())
+
+
+def study_question(d, s):
+    if s.get("question_file"):
+        f = Path(d) / s["question_file"]
+        if not f.exists():
+            sys.exit(f"study01: question_file {f} not found")
+        return norm_q(f.read_text())
+    return norm_q(s.get("question"))
+
+
+def check_study(d, p):
+    """Stop unless the study block is complete and the protocol searches the original question."""
+    s = study(p)
+    if s is None:
+        return None
+    problems = []
+    if not s.get("run_id"):
+        problems.append("study.run_id is missing")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(s.get("search_end", ""))):
+        problems.append("study.search_end must be YYYY-MM-DD")
+    if "block_file" not in s:
+        problems.append('study.block_file is missing (use "" only for a pilot run with no block list)')
+    elif s["block_file"] and not (Path(d) / s["block_file"]).exists():
+        problems.append(f"study.block_file {s['block_file']} not found")
+    original = study_question(d, s)
+    if not original:
+        problems.append("study.question_file (or study.question) is missing")
+    elif norm_q(p.get("question")) != original:
+        problems.append("protocol question differs from the original question; study01 searches the original exactly")
+    for k, v in (("reviews", "exclude"), ("letters", "exclude")):
+        if p.get(k) != v:
+            problems.append(f'study01 needs "{k}": "{v}"')
+    if problems:
+        sys.exit("study01: " + "; ".join(problems))
+    return s
+
+
+def load_block(d, s):
+    """DOIs and PMIDs from the sealed block file (JSON {"doi": [...], "pmid": [...]} or a list); never printed."""
+    if not s or not s.get("block_file"):
+        return {"doi": set(), "pmid": set(), "sha256": "", "n": 0}
+    raw = (Path(d) / s["block_file"]).read_bytes()
+    data = json.loads(raw)
+    items = data if isinstance(data, list) else (data.get("doi") or data.get("dois") or []) + \
+        (data.get("pmid") or data.get("pmids") or [])
+    doi = {str(x).strip().lower().removeprefix("https://doi.org/").removeprefix("doi:") for x in items if "/" in str(x)}
+    pmid = {str(x).strip().removeprefix("PMID:") for x in items if str(x).strip().removeprefix("PMID:").isdigit()}
+    return {"doi": doi, "pmid": pmid, "sha256": hashlib.sha256(raw).hexdigest(), "n": len(doi) + len(pmid)}
+
+
+def gate_reason(r, block, end):
+    """Why a study01 run must drop this record: 'blocked', 'after_search_end' or None."""
+    if (r.get("doi") and r["doi"] in block["doi"]) or (r.get("pmid") and r["pmid"] in block["pmid"]):
+        return "blocked"
+    floor = date_floor(r.get("date") or (str(r["year"]) if r.get("year") else ""))
+    return "after_search_end" if floor and floor > end else None
+
+
+def study_gate(d, p, new):
+    """study01: drop blocked records and records published after the search end date, before anything sees them.
+    Dropped records go to study_removed.json (blocked ones by id only); returns (kept, counts)."""
+    s = study(p)
+    if s is None:
+        return new, {}
+    block, end = load_block(d, s), s["search_end"]
+    removed = load(d, "study_removed.json", [])
+    kept, counts = [], Counter()
+    for r in new:
+        why = gate_reason(r, block, end)
+        if why is None:
+            kept.append(r)
+            continue
+        counts[why] += 1
+        removed.append({"id": r["id"], "reason": why} if why == "blocked" else
+                       {"id": r["id"], "reason": why, "doi": r["doi"], "pmid": r["pmid"], "date": r.get("date", "")})
+    save(d, "study_removed.json", removed)
+    return kept, dict(counts)
+
+
+def code_fingerprint():
+    """sha256 of the skill's own files, so a frozen version can be proven for every run."""
+    here = Path(__file__).resolve().parent
+    files = sorted(list(here.glob("*.py")) + [here.parent / "SKILL.md"] + list((here.parent / "references").glob("*.md")))
+    h = hashlib.sha256()
+    for f in files:
+        if f.exists():
+            h.update(f.name.encode() + b"\0" + f.read_bytes())
+    return h.hexdigest()
+
+
 # ---------------------------------------------------------------- protocol -> queries
 
 def build_queries(p):
@@ -81,32 +195,68 @@ def build_queries(p):
         parts = [fmt_term(t) for t in c.get("terms", [])] + [fmt_mesh(m) for m in c.get("mesh", [])]
         return "(" + " OR ".join(parts) + ")"
 
+    end = (study(p) or {}).get("search_end")  # study01: limit to the review's search end date, to the day
     pubmed = " AND ".join(group(c, lambda t: f'"{t}"[tiab]', lambda m: f'"{m}"[MeSH Terms]') for c in concepts)
-    if y0 or y1:
+    if end:
+        pubmed += f' AND ("{y0 or 1900}/01/01"[dp] : "{end.replace("-", "/")}"[dp])'
+    elif y0 or y1:
         pubmed += f' AND ("{y0 or 1900}"[dp] : "{y1 or 3000}"[dp])'
     if p.get("humans_only"):
         pubmed += " NOT (animals[mh] NOT humans[mh])"
     epmc = " AND ".join(group(c, lambda t: f'(TITLE:"{t}" OR ABSTRACT:"{t}")', lambda m: f'MESH_HEADING:"{m}"')
                         for c in concepts)
-    if y0 or y1:
+    if end:
+        epmc += f" AND FIRST_PDATE:[{y0 or 1900}-01-01 TO {end}]"
+    elif y0 or y1:
         epmc += f" AND PUB_YEAR:[{y0 or 1900} TO {y1 or 3000}]"
     trials = " AND ".join("(" + " OR ".join(c.get("terms", [])) + ")" for c in concepts
                           if c.get("in_trials", True))
     return {"pubmed": explicit.get("pubmed") or pubmed,
             "europepmc": explicit.get("europepmc") or epmc,
-            "trials": explicit.get("trials", trials)}
+            "trials": explicit.get("trials", trials), "trials_end": end or ""}
 
 
 # ---------------------------------------------------------------- record normalisation
 
 def record(rid, **kw):
     r = {"id": rid, "pmid": "", "pmcid": "", "doi": "", "title": "", "authors": [], "first_author": "", "year": None,
-         "journal": "", "volume": "", "issue": "", "pages": "", "abstract": "", "pub_types": [], "found_by": []}
+         "date": "", "journal": "", "volume": "", "issue": "", "pages": "", "abstract": "", "pub_types": [], "found_by": []}
     r.update({k: v for k, v in kw.items() if v not in (None, "")})
     r["doi"] = (r["doi"] or "").lower().removeprefix("https://doi.org/")
     if r["authors"] and not r["first_author"]:
         r["first_author"] = r["authors"][0].split()[0] if r["authors"][0] else ""
     return r
+
+
+_MONTHS = {m: i + 1 for i, m in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split())}
+
+
+def ymd(y, m=None, d=None):
+    """'YYYY', 'YYYY-MM' or 'YYYY-MM-DD' from loose parts (month as 3, '03' or 'Mar'); '' without a year."""
+    y = str(y or "").strip()
+    if not re.fullmatch(r"\d{4}", y):
+        return ""
+    m = str(m or "").strip().lower()
+    mm = int(m) if m.isdigit() else _MONTHS.get(m[:3])
+    if not mm or not 1 <= mm <= 12:
+        return y
+    dd = str(d or "").strip()
+    return f"{y}-{mm:02d}-{int(dd):02d}" if dd.isdigit() and 1 <= int(dd) <= 31 else f"{y}-{mm:02d}"
+
+
+def date_floor(date):
+    """Earliest day a 'YYYY' / 'YYYY-MM' / 'YYYY-MM-DD' date can mean, as 'YYYY-MM-DD' ('' if none)."""
+    parts = str(date or "")[:10].split("-")
+    if not parts[0].isdigit():
+        return ""
+    return "-".join([parts[0]] + [(parts[i] if len(parts) > i and parts[i].isdigit() else "01") for i in (1, 2)])
+
+
+def earliest(dates):
+    """The earliest of several partial dates (by the earliest day each can mean); '' if none is usable."""
+    good = [ymd(*(str(x)[:10].split("-") + [None, None])[:3]) for x in dates if x]
+    good = [g for g in good if g]
+    return min(good, key=date_floor) if good else ""
 
 
 def pubmed_records(http, pmids):
@@ -129,12 +279,17 @@ def pubmed_records(http, pmids):
                 (f"{t.get('Label')}: " if t.get("Label") else "") + "".join(t.itertext())
                 for t in a.findall("Abstract/AbstractText"))
             year = j.findtext("JournalIssue/PubDate/Year") or (j.findtext("JournalIssue/PubDate/MedlineDate") or "")[:4]
+            pub = j.find("JournalIssue/PubDate")
+            dates = [ymd(x.findtext("Year"), x.findtext("Month"), x.findtext("Day")) for x in a.findall("ArticleDate")]
+            if pub is not None:
+                dates.append(ymd(pub.findtext("Year") or (pub.findtext("MedlineDate") or "")[:4],
+                                 pub.findtext("Month") or (pub.findtext("MedlineDate") or "")[5:8], pub.findtext("Day")))
             ids = {i.get("IdType"): i.text for i in art.findall("PubmedData/ArticleIdList/ArticleId")}
             out.append(record(
                 f"PMID:{mc.findtext('PMID')}", pmid=mc.findtext("PMID"), pmcid=ids.get("pmc", ""), doi=ids.get("doi", ""),
                 title=collapse("".join(a.find("ArticleTitle").itertext())), authors=authors,
                 first_author=authors[0].rsplit(" ", 1)[0] if authors and " " in authors[0] else (authors or [""])[0],
-                year=int(year) if year.isdigit() else None,
+                year=int(year) if year.isdigit() else None, date=earliest(dates),
                 journal=j.findtext("ISOAbbreviation") or j.findtext("Title") or "",
                 volume=j.findtext("JournalIssue/Volume") or "", issue=j.findtext("JournalIssue/Issue") or "",
                 pages=a.findtext("Pagination/MedlinePgn") or "", abstract=collapse(abstract),
@@ -151,15 +306,19 @@ def epmc_record(r):
                   title=strip_tags(r.get("title", "")), authors=authors,
                   first_author=(authors[0].rsplit(" ", 1)[0] if authors and " " in authors[0] else (authors or [""])[0]),
                   year=int(r["pubYear"]) if str(r.get("pubYear", "")).isdigit() else None,
+                  date=earliest([r.get("firstPublicationDate", ""), r.get("electronicPublicationDate", "")]),
                   journal=(ji.get("journal") or {}).get("isoabbreviation") or (ji.get("journal") or {}).get("title", ""),
                   volume=ji.get("volume", ""), issue=ji.get("issue", ""), pages=r.get("pageInfo", ""),
                   abstract=strip_tags(r.get("abstractText", "")), pub_types=(r.get("pubTypeList") or {}).get("pubType", []))
 
 
-def trial_records(http, query, limit):
-    fields = "NCTId,BriefTitle,OfficialTitle,LeadSponsorName,StartDate,OverallStatus,BriefSummary,PrimaryOutcomeMeasure"
+def trial_records(http, query, limit, end=None):
+    """end (YYYY-MM-DD): only registrations first posted on or before that day (study01 mode)."""
+    fields = ("NCTId,BriefTitle,OfficialTitle,LeadSponsorName,StartDate,StudyFirstPostDate,OverallStatus,BriefSummary,"
+              "PrimaryOutcomeMeasure")
+    when = "&filter.advanced=" + quote(f"AREA[StudyFirstPostDate]RANGE[MIN,{end}]") if end else ""
     _, data = http.json(f"https://clinicaltrials.gov/api/v2/studies?pageSize={min(limit, 100)}&fields={fields}"
-                        f"&countTotal=true&query.term=" + quote(query))
+                        f"&countTotal=true{when}&query.term=" + quote(query))
     out = []
     for s in (data or {}).get("studies", []):
         p = s.get("protocolSection", {})
@@ -169,7 +328,9 @@ def trial_records(http, query, limit):
         out.append(record(
             f"NCT:{ident.get('nctId')}", title=ident.get("briefTitle", ""),
             authors=[(p.get("sponsorCollaboratorsModule") or {}).get("leadSponsor", {}).get("name", "")],
-            year=int(start[:4]) if start[:4].isdigit() else None, journal=f"ClinicalTrials.gov {ident.get('nctId')}",
+            year=int(start[:4]) if start[:4].isdigit() else None,
+            date=earliest([(status.get("studyFirstPostDateStruct") or {}).get("date", "")]),
+            journal=f"ClinicalTrials.gov {ident.get('nctId')}",
             abstract=collapse(f"{(p.get('descriptionModule') or {}).get('briefSummary', '')} Primary outcome: {outcomes}. "
                               f"Status: {status.get('overallStatus', '')}; start {start}."),
             pub_types=["Trial registration"]))
@@ -203,6 +364,8 @@ def merge(records, new, source):
             for f, v in r.items():
                 if not old.get(f) and v:
                     old[f] = v
+            if r.get("date") and old.get("date"):
+                old["date"] = earliest([old["date"], r["date"]])
             if source not in old["found_by"]:
                 old["found_by"].append(source)
             continue
@@ -237,6 +400,9 @@ def cmd_check(a):
     """Hit counts for the draft concepts, then the rubric total and verdict, as question_check.md."""
     d = Path(a.dir)
     p, qc = load(d, "protocol.json"), load(d, "question_check.json")
+    st = check_study(d, p)
+    if st is not None and norm_q(qc.get("question")) != study_question(d, st):
+        sys.exit("study01: question_check.json must score the original question exactly as written")
     http = http_for(d)
     concepts = p.get("concepts", [])
     counts = {"combined": pubmed_count(http, build_queries({**p, "queries": {}})["pubmed"]), "alone": {}, "without": {}}
@@ -248,12 +414,15 @@ def cmd_check(a):
             rest = [x for x in concepts if x is not c]
             counts["without"][c["name"]] = pubmed_count(http, build_queries({**p, "queries": {}, "concepts": rest})["pubmed"])
     y1 = datetime.now().year
-    sr_q = build_queries({**p, "queries": {}, "years": [y1 - 5, y1]})["pubmed"] + \
-        ' AND (systematic review[pt] OR meta-analysis[pt] OR "systematic review"[ti] OR "meta-analysis"[ti])'
-    _, res = http.json(f"{EUTILS}/esearch.fcgi?db=pubmed&retmode=json&retmax=5&sort=pub_date&term=" + quote(sr_q))
-    es = (res or {}).get("esearchresult", {})
-    counts["reviews"] = {"count": int(es.get("count", 0)), "pmids": es.get("idlist", []), "years": [y1 - 5, y1]}
-    reviews = pubmed_records(http, counts["reviews"]["pmids"]) if counts["reviews"]["pmids"] else []
+    if st is not None:  # study01: never look up or show existing reviews; one could be the benchmark
+        counts["reviews"], reviews = {"count": 0, "pmids": [], "years": [y1 - 5, y1], "hidden": True}, []
+    else:
+        sr_q = build_queries({**p, "queries": {}, "years": [y1 - 5, y1]})["pubmed"] + \
+            ' AND (systematic review[pt] OR meta-analysis[pt] OR "systematic review"[ti] OR "meta-analysis"[ti])'
+        _, res = http.json(f"{EUTILS}/esearch.fcgi?db=pubmed&retmode=json&retmax=5&sort=pub_date&term=" + quote(sr_q))
+        es = (res or {}).get("esearchresult", {})
+        counts["reviews"] = {"count": int(es.get("count", 0)), "pmids": es.get("idlist", []), "years": [y1 - 5, y1]}
+        reviews = pubmed_records(http, counts["reviews"]["pmids"]) if counts["reviews"]["pmids"] else []
     scores = dict(qc.get("scores", {}))
     missing = [k for k, _ in RUBRIC if k != "feasibility" and k not in scores]
     if missing:
@@ -279,14 +448,20 @@ def cmd_check(a):
         lines.append("Dropping one concept would give: " + "; ".join(
             f"without {k} {v:,}" for k, v in counts["without"].items()) + ".")
     rv = counts["reviews"]
-    if rv["count"]:
+    if rv.get("hidden"):
+        lines.append("Existing systematic reviews: not looked up (study01 mode).")
+    elif rv["count"]:
         lines.append(f"Systematic reviews or meta-analyses since {rv['years'][0]}: {rv['count']} (newest first):")
         lines += [f"- {r['first_author']} et al., {r['journal']} {r['year']}: {r['title']} (PMID {r['pmid']})" for r in reviews]
     else:
         lines.append(f"No systematic review or meta-analysis since {rv['years'][0]} matches these concepts.")
     if blocking:
         lines.append(f"Missing from the question: {', '.join(blocking)}.")
-    if verdict != "Ready":
+    if st is not None:
+        if qc.get("refined_question"):
+            lines += ["", f"Suggested question (logged only, not searched): {qc['refined_question']}"]
+        lines.append("study01 mode: the search uses the original question exactly as written.")
+    elif verdict != "Ready":
         if qc.get("refined_question"):
             lines += ["", f"**Suggested question** (my additions in [brackets]): {qc['refined_question']}"]
         lines.append("The original question can't be searched well, so the search will use the suggested question."
@@ -300,6 +475,7 @@ def cmd_search(a):
     p = load(d, "protocol.json")
     if not p.get("approved"):
         sys.exit('protocol.json is not approved. The user must review it and set "approved": true first.')
+    check_study(d, p)
     http = http_for(d)
     q = build_queries(p)
     limit = int(p.get("max_per_source", 200))
@@ -309,9 +485,11 @@ def cmd_search(a):
     _, res = http.json(f"{EUTILS}/esearch.fcgi?db=pubmed&retmode=json&sort=relevance&retmax={limit}&term=" + quote(q["pubmed"]))
     es = (res or {}).get("esearchresult", {})
     found = pubmed_records(http, es.get("idlist", []))
+    n_found = len(found)
+    found, dropped = study_gate(d, p, found)
     log["searches"].append({"source": "PubMed", "query": q["pubmed"], "date": when, "hits": int(es.get("count", 0)),
-                            "retrieved": len(found), "new": merge(records, found, "PubMed"),
-                            "translated": es.get("querytranslation", "")})
+                            "retrieved": n_found, "new": merge(records, found, "PubMed"),
+                            "translated": es.get("querytranslation", ""), **({"study_removed": dropped} if dropped else {})})
 
     found, cursor, total = [], "*", 0
     while len(found) < limit:
@@ -325,13 +503,21 @@ def cmd_search(a):
             break
         cursor = nxt
     found = found[:limit]
+    n_found = len(found)
+    found, dropped = study_gate(d, p, found)
     log["searches"].append({"source": "Europe PMC", "query": q["europepmc"], "date": when, "hits": total,
-                            "retrieved": len(found), "new": merge(records, found, "Europe PMC")})
+                            "retrieved": n_found, "new": merge(records, found, "Europe PMC"),
+                            **({"study_removed": dropped} if dropped else {})})
 
     if q["trials"]:
-        total, found = trial_records(http, q["trials"], limit)
-        log["searches"].append({"source": "ClinicalTrials.gov", "query": q["trials"], "date": when, "hits": total,
-                                "retrieved": len(found), "new": merge(records, found, "ClinicalTrials.gov")})
+        total, found = trial_records(http, q["trials"], limit, q.get("trials_end") or None)
+        n_found = len(found)
+        found, dropped = study_gate(d, p, found)
+        log["searches"].append({"source": "ClinicalTrials.gov", "query": q["trials"]
+                                + (f" [first posted on or before {q['trials_end']}]" if q.get("trials_end") else ""),
+                                "date": when, "hits": total, "retrieved": n_found,
+                                "new": merge(records, found, "ClinicalTrials.gov"),
+                                **({"study_removed": dropped} if dropped else {})})
     save(d, "records.json", records)
     save(d, "search_log.json", log)
     for s in log["searches"][-3:]:
@@ -352,14 +538,14 @@ def openalex_record(w):
     return record(f"PMID:{pmid}" if pmid else f"OA:{w.get('id', '').rsplit('/', 1)[-1]}", pmid=pmid,
                   doi=(w.get("doi") or ""), title=w.get("title") or "", authors=authors,
                   first_author=authors[0].split()[-1] if authors and authors[0] else "",
-                  year=w.get("publication_year"),
+                  year=w.get("publication_year"), date=earliest([w.get("publication_date") or ""]),
                   journal=((w.get("primary_location") or {}).get("source") or {}).get("display_name", ""),
                   volume=bib.get("volume") or "", issue=bib.get("issue") or "", pages=pages,
                   abstract=" ".join(t for _, t in words), pub_types=[w.get("type", "")])
 
 
 S2 = "https://api.semanticscholar.org/graph/v1/paper"
-S2_FIELDS = "externalIds,title,year,abstract,venue,authors,publicationTypes"
+S2_FIELDS = "externalIds,title,year,publicationDate,abstract,venue,authors,publicationTypes"
 
 
 def s2_record(w):
@@ -368,7 +554,7 @@ def s2_record(w):
     return record(f"PMID:{pmid}" if pmid else f"S2:{w.get('paperId')}", pmid=pmid, doi=ext.get("DOI") or "",
                   title=w.get("title") or "", authors=authors,
                   first_author=authors[0].split()[-1] if authors and authors[0] else "", year=w.get("year"),
-                  journal=w.get("venue") or "", abstract=w.get("abstract") or "", pub_types=w.get("publicationTypes") or [])
+                  date=earliest([w.get("publicationDate") or ""]), journal=w.get("venue") or "", abstract=w.get("abstract") or "", pub_types=w.get("publicationTypes") or [])
 
 
 def openalex_auth():
@@ -381,7 +567,7 @@ _OPENALEX_WARNED = []
 
 
 def links_openalex(http, r, cap):
-    select = "id,doi,title,publication_year,authorships,primary_location,ids,biblio,abstract_inverted_index,type,referenced_works"
+    select = "id,doi,title,publication_year,publication_date,authorships,primary_location,ids,biblio,abstract_inverted_index,type,referenced_works"
     ident = f"doi:{r['doi']}" if r["doi"] else f"pmid:{r['pmid']}"
     auth = openalex_auth()
     status, w = http.json(f"https://api.openalex.org/works/{ident}?select={select}{auth}")
@@ -460,6 +646,9 @@ def cmd_chase(a):
     d = Path(a.dir)
     http = http_for(d)
     records, log = load(d, "records.json"), load(d, "search_log.json")
+    p = load(d, "protocol.json", {})
+    st = check_study(d, p)
+    block = load_block(d, st)
     added_total, chased = 0, []
     sources = [("OpenAlex", links_openalex), ("Semantic Scholar", links_s2), ("Europe PMC", links_epmc),
                ("PubMed links", links_pubmed)]
@@ -469,6 +658,9 @@ def cmd_chase(a):
         if not r or not (r["doi"] or r["pmid"]):
             print(f"skip {rid}: unknown record or no DOI/PMID", file=sys.stderr)
             continue
+        if st is not None and gate_reason(r, block, st["search_end"]):
+            print(f"skip {rid}: not allowed as a seed in study01 mode", file=sys.stderr)
+            continue
         via, found, citing, capped, failed = "", [], [], False, []
         for name, fn in sources:
             got = fn(http, r, a.max)
@@ -477,12 +669,19 @@ def cmd_chase(a):
                 break
             failed.append(name)
         similar = similar_pubmed(http, r["pmid"], a.similar) if r["pmid"] and a.similar else []
+        dropped = Counter()
+        found, c1 = study_gate(d, p, found)
+        citing, c2 = study_gate(d, p, citing)
+        similar, c3 = study_gate(d, p, similar)
+        for c in (c1, c2, c3):
+            dropped.update(c)
         n_back, n_fwd = merge(records, found, f"cited by {rid}"), merge(records, citing, f"cites {rid}")
         n_sim = merge(records, similar, f"similar to {rid}")
         added_total += n_back + n_fwd + n_sim
         chased.append({"seed": rid, "via": via or "none reachable", "unreachable": failed, "references": len(found),
                        "citing": len(citing), "similar": len(similar), "new": n_back + n_fwd + n_sim,
-                       "date": datetime.now().isoformat(timespec="seconds"), "capped": capped, "max": a.max})
+                       "date": datetime.now().isoformat(timespec="seconds"), "capped": capped, "max": a.max,
+                       **({"study_removed": dict(dropped)} if dropped else {})})
         print(f"{rid}: {len(found)} references, {len(citing)} citing via {via or 'no source'}"
               + (f" ({', '.join(failed)} unreachable)" if failed else "")
               + f", {len(similar)} similar (PubMed); {n_back + n_fwd + n_sim} new", file=sys.stderr)
@@ -502,6 +701,12 @@ def question_text(p):
 def cmd_rank(a):
     d = Path(a.dir)
     p, records = load(d, "protocol.json"), load(d, "records.json")
+    if study(p) is not None:  # last safety net: nothing blocked or too new reaches the screening list
+        kept, dropped = study_gate(d, p, list(records.values()))
+        if dropped:
+            records = {r["id"]: r for r in kept}
+            save(d, "records.json", records)
+            print(f"study01: removed {sum(dropped.values())} more records before ranking", file=sys.stderr)
     ids = list(records)
     docs = [f"{records[i]['title']} {records[i]['title']} {records[i]['abstract']}" for i in ids]
     scores = bm25(question_text(p), docs)
@@ -1209,6 +1414,10 @@ def cmd_workbook(a):
     reasons = Counter(x.get("reason") for x in decisions.values() if x.get("decision") == "exclude")
     for r, n in reasons.most_common():
         ws.append([f"  excluded: {r}", n])
+    if study(p) is not None:
+        gone = Counter(x["reason"] for x in load(d, "study_removed.json", []))
+        ws.append(["Removed: published after the search end date (study01)", gone.get("after_search_end", 0)])
+        ws.append(["Removed: on the block list (study01)", gone.get("blocked", 0)])
     for row in ws.iter_rows():
         for cell in row:
             cell.font, cell.alignment = base, wrap
@@ -1220,6 +1429,11 @@ def cmd_workbook(a):
     q = build_queries(p)
     rows = [("Question", p.get("question", "")), ("Approved", str(p.get("approved", False)))]
     qc = load(d, "question_check.json", {})
+    st = study(p)
+    if st is not None:
+        rows += [("Mode", f"study01 (run {st.get('run_id', '')})"), ("Search end date", st.get("search_end", "")),
+                 ("Suggested question (logged, not searched)", qc.get("refined_question", "")),
+                 ("Code sha256", code_fingerprint())]
     if qc.get("scores"):
         rows += [("Question as asked", qc.get("question", "")),
                  ("Question check", f"{qc.get('verdict', '')} ({qc.get('total', '')}/16), type: {qc.get('question_type', '')}")]
@@ -1246,6 +1460,8 @@ def cmd_workbook(a):
     print(f"workbook -> {d / 'lit_review.xlsx'}", file=sys.stderr)
     write_review_page(d)
     write_ris(d)
+    if study(p) is not None:
+        write_export(d)
 
 
 def write_ris(d):
@@ -1291,13 +1507,87 @@ def cmd_ris(a):
     write_ris(a.dir)
 
 
+# ---------------------------------------------------------------- export for matching (study01 and on request)
+
+EXPORT_ORDER = {"include": 0, "maybe": 1, "exclude": 2, "not_screened": 3, "no_decision": 4,
+                "removed_after_search_end": 5}
+
+
+def write_export(d):
+    """study_export.csv: one row per de-duplicated record (DOI, PMID, date, decision, where it stopped), plus records
+    dropped for falling after the search end date; run_summary.json: flow counts and run metadata. Blocked records
+    are counted only."""
+    d = Path(d)
+    p, records, log = load(d, "protocol.json"), load(d, "records.json", {}), load(d, "search_log.json", {})
+    s, qc = study(p) or {}, load(d, "question_check.json", {})
+    screen = load(d, "screening_list.json", [])
+    rank = {x["id"]: x["rank"] for x in screen}
+    decisions = {x["id"]: x for x in load(d, "screening_decisions.json", [])}
+    evidence = load(d, "evidence.json", [])
+    verified = Counter(e["paper_id"] for e in evidence if e.get("status") == "verified")
+    listed = set(load(d, "facts_map.json", {"references": []}).get("references", []))
+    removed = load(d, "study_removed.json", [])
+    rows = []
+    for rid, r in records.items():
+        x = decisions.get(rid) or {}
+        dec = x.get("decision") or ("not_screened" if rid not in rank else "no_decision")
+        rows.append({"run_id": s.get("run_id", ""), "record": rid, "doi": r["doi"], "pmid": r["pmid"],
+                     "nct": rid[4:] if rid.startswith("NCT:") else "", "date": r.get("date", ""), "year": r.get("year") or "",
+                     "date_partial": "yes" if len(r.get("date", "")) < 10 else "no", "found_by": "; ".join(r["found_by"]),
+                     "screen_rank": rank.get(rid, ""), "decision": dec,
+                     "exclude_reason": x.get("reason", "") if dec == "exclude" else "", "check_PIOD": x.get("check", ""),
+                     "verified_facts": verified.get(rid, 0), "in_fact_list": "yes" if rid in listed else "no",
+                     "first_author": r["first_author"], "title": r["title"]})
+    for x in removed:
+        if x["reason"] == "after_search_end":
+            rows.append({"run_id": s.get("run_id", ""), "record": x["id"], "doi": x.get("doi", ""), "pmid": x.get("pmid", ""),
+                         "nct": x["id"][4:] if x["id"].startswith("NCT:") else "", "date": x.get("date", ""),
+                         "decision": "removed_after_search_end"})
+    rows.sort(key=lambda r: (EXPORT_ORDER.get(r["decision"], 9), r.get("screen_rank") or 10 ** 6))
+    cols = ["run_id", "record", "doi", "pmid", "nct", "date", "year", "date_partial", "found_by", "screen_rank", "decision",
+            "exclude_reason", "check_PIOD", "verified_facts", "in_fact_list", "first_author", "title"]
+    with open(d / "study_export.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=cols, restval="")
+        w.writeheader()
+        w.writerows(rows)
+    dec = Counter(r["decision"] for r in rows)
+    gone = Counter(x["reason"] for x in removed)
+    block = load_block(d, s) if s else {"sha256": "", "n": 0}
+    summary = {
+        "mode": p.get("mode", "standard"), "run_id": s.get("run_id", ""), "search_end": s.get("search_end", ""),
+        "question": p.get("question", ""), "question_check": {"verdict": qc.get("verdict", ""), "total": qc.get("total", "")},
+        "suggested_question_logged_not_used": qc.get("refined_question", "") if s else "",
+        "concepts": p.get("concepts", []), "subquestions": p.get("subquestions", []),
+        "reviews": p.get("reviews", ""), "letters": p.get("letters", ""), "humans_only": p.get("humans_only"),
+        "caps": {"max_per_source": p.get("max_per_source", 200), "max_screen": p.get("max_screen", 150)},
+        "models": s.get("models", {}), "code_sha256": code_fingerprint(),
+        "block_list": {"sha256": block["sha256"], "entries": block["n"], "records_removed": gone.get("blocked", 0)},
+        "searches": [{k: x.get(k) for k in ("source", "date", "hits", "retrieved", "new", "study_removed")}
+                     for x in log.get("searches", [])],
+        "chasing": [{k: x.get(k) for k in ("seed", "via", "references", "citing", "similar", "new", "study_removed")}
+                    for x in log.get("chasing", [])],
+        "flow": {"unique_records": len(records), "removed_after_search_end": gone.get("after_search_end", 0),
+                 "removed_blocked": gone.get("blocked", 0), "screened": len(screen),
+                 "not_screened_low_rank": dec.get("not_screened", 0), "include": dec.get("include", 0),
+                 "maybe": dec.get("maybe", 0), "exclude": dec.get("exclude", 0),
+                 "verified_facts": sum(verified.values()), "papers_in_fact_list": len(listed)},
+        "written": datetime.now().isoformat(timespec="seconds")}
+    save(d, "run_summary.json", summary)
+    print(f"export -> {d / 'study_export.csv'} ({len(rows)} rows: {dec.get('include', 0)} include, "
+          f"{dec.get('maybe', 0)} maybe) and run_summary.json", file=sys.stderr)
+
+
+def cmd_export(a):
+    write_export(a.dir)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     imp = sub.add_parser("import-edits")
     imp.add_argument("dir")
     imp.add_argument("file", help="JSON from the review artifact's reviews/<dir name>/edits collection (ArtifactData list)")
-    for name in ("check", "search", "rank", "screen", "retrieve", "verify", "facts", "summary", "paragraph", "draft", "workbook", "chase", "queries", "ris"):
+    for name in ("check", "search", "rank", "screen", "retrieve", "verify", "facts", "summary", "paragraph", "draft", "workbook", "chase", "queries", "ris", "export"):
         s = sub.add_parser(name)
         s.add_argument("dir")
         if name == "chase":
@@ -1319,7 +1609,8 @@ def main():
         print(json.dumps(build_queries(load(a.dir, "protocol.json")), indent=1))
         return
     sys.exit({"import-edits": cmd_import_edits, "check": cmd_check, "search": cmd_search, "chase": cmd_chase, "rank": cmd_rank, "screen": cmd_screen, "retrieve": cmd_retrieve,
-              "verify": cmd_verify, "facts": cmd_facts, "summary": cmd_summary, "paragraph": cmd_paragraph, "draft": cmd_draft, "workbook": cmd_workbook, "ris": cmd_ris}[a.cmd](a) or 0)
+              "verify": cmd_verify, "facts": cmd_facts, "summary": cmd_summary, "paragraph": cmd_paragraph, "draft": cmd_draft, "workbook": cmd_workbook, "ris": cmd_ris,
+              "export": cmd_export}[a.cmd](a) or 0)
 
 
 if __name__ == "__main__":
