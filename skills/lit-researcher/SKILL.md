@@ -28,6 +28,8 @@ Only when the request starts with `study01`. It is for validation-study runs tha
 study01 run=R01-A end=2026-03-15 question=<path to question file> block=<path to block file, or none>
 ```
 
+Run IDs: `R##-A` for real study runs, `T##-A` for test runs.
+
 Copy the question file and the block file into the work folder `lit/<run>/` (copy with a shell command; **never open, print or summarize the block file**: it names the benchmark review). Then follow the normal steps with these changes:
 
 1. **Question check (step 1):** score the question and write `refined_question` as usual (it is logged, not searched), but write `protocol.json` for the **original question exactly as written**, with `"mode": "study01"` and:
@@ -37,8 +39,9 @@ Copy the question file and the block file into the work folder `lit/<run>/` (cop
 3. **Search to the day:** code limits every source to `search_end` (PubMed, Europe PMC, ClinicalTrials.gov first-posted date) and drops any record, including chased, citing and similar papers, published after it or on the block list. Papers citing the review come after it, so the date limit removes them too. Never choose a removed record as a seed.
 4. **Models:** use the models in the table below wherever you can choose them, and record the ones actually used in `study.models` (the same models for every run).
 5. Steps 2 to 8 run as usual (chase 3–5 seeds, screen, second look at maybes, retrieve, extract, verify, facts, ref-check, workbook). Leave every "Your …" column empty.
+   **Ref-check re-judging (step 7):** right after the first ref-check finalizes, and before fixing anything, run `cp <dir>/refcheck/report.json <dir>/refcheck_first_pass.json`. If facts need fixing, fix them in step 5 and rerun `verify` and `facts` as usual, but re-judge the changed facts in a **new subagent** that did not do step 5 or the first ref-check (never resume the first one). Give it only `refcheck/checks.json` rows for the changed facts and `references/ref-check.md`; copy the unchanged judgments into `judgments.json` unchanged, then finalize. Do this once. `export` compares the first pass with the final report and logs how many facts were reworded.
 6. **Export:** `workbook` also writes `study_export.csv` (every record with DOI, PMID, date, decision and where it stopped: include, maybe, exclude, not screened, removed after the search end date) and `run_summary.json` (flow counts, queries, seeds, models, settings, logged suggested question, and a sha256 of the skill's code to prove the frozen version). `python3 <skill-dir>/scripts/litsearch.py export <dir>` rebuilds them.
-7. **Reply:** only the files (workbook, `study_export.csv`, `run_summary.json`) and the flow counts. No bottom line, no synthesis. If a step fails for a technical reason, stop and say which step; don't retry with changed settings.
+7. **Reply:** the files (workbook, `study_export.csv`, `run_summary.json`), then the **Bottom line** lines that `workbook`/`export` prints (also saved as `bottom_line` in `run_summary.json`), pasted exactly as printed. They are counts only. No synthesis of the evidence and no clinical answer. If a step fails for a technical reason, stop and say which step; don't retry with changed settings.
 
 ## 1. Question check and concepts, then stop for approval
 

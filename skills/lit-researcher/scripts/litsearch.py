@@ -1572,9 +1572,59 @@ def write_export(d):
                  "maybe": dec.get("maybe", 0), "exclude": dec.get("exclude", 0),
                  "verified_facts": sum(verified.values()), "papers_in_fact_list": len(listed)},
         "written": datetime.now().isoformat(timespec="seconds")}
+    summary["refcheck"] = refcheck_summary(d)
+    summary["bottom_line"] = bottom_line(summary)
     save(d, "run_summary.json", summary)
     print(f"export -> {d / 'study_export.csv'} ({len(rows)} rows: {dec.get('include', 0)} include, "
           f"{dec.get('maybe', 0)} maybe) and run_summary.json", file=sys.stderr)
+    print("\n".join(summary["bottom_line"]))
+
+
+RC_ORDER = ("supports", "partial", "contradicts", "not_found", "cannot_assess", "unverified_quote", "not_judged")
+
+
+def refcheck_summary(d):
+    """Ref-check verdict counts for the first pass and the final report, and which facts were reworded in between.
+    The first pass is refcheck_first_pass.json (a copy of refcheck/report.json saved before any fix); a fact counts as
+    reworded when its claim text differs between the two for the same check id."""
+    d = Path(d)
+    final = load(d / "refcheck", "report.json", {"checks": []})["checks"] if (d / "refcheck" / "report.json").exists() else []
+    first = load(d, "refcheck_first_pass.json", {"checks": []})["checks"] if (d / "refcheck_first_pass.json").exists() else None
+    count = lambda rows: {k: v for k, v in sorted(Counter(r["verdict"] for r in rows).items(),
+                                                      key=lambda kv: RC_ORDER.index(kv[0]) if kv[0] in RC_ORDER else 99)}
+    out = {"final": count(final), "checks": len(final)}
+    if first is None:
+        out.update({"first_pass": out["final"], "facts_reworded": 0, "reworded_ids": [],
+                    "note": "no refcheck_first_pass.json: no fact was reworded, or the first pass was not saved"})
+        return out
+    before = {r["id"]: r.get("claim", "") for r in first}
+    reworded = sorted(r["id"] for r in final if r["id"] in before and r.get("claim", "") != before[r["id"]])
+    out.update({"first_pass": count(first), "facts_reworded": len(reworded), "reworded_ids": reworded,
+                "rejudged_by": "fresh ref-check subagent (study01 rule)" if reworded else ""})
+    return out
+
+
+def bottom_line(s):
+    """Two or three plain lines that state the run's result in counts only (no clinical synthesis)."""
+    f, rc = s["flow"], s.get("refcheck", {})
+    lines = [f"Bottom line: {f['unique_records']} records found, {f['screened']} screened: {f['include']} include, "
+             f"{f['maybe']} maybe, {f['exclude']} exclude; {f['not_screened_low_rank']} not screened (below the "
+             f"max_screen cap of {s['caps']['max_screen']})."]
+    fin = rc.get("final", {})
+    if rc.get("checks"):
+        verdicts = ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in fin.items())
+        extra = ""
+        if rc.get("facts_reworded"):
+            first = ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in rc["first_pass"].items())
+            extra = f" First pass: {first}; {rc['facts_reworded']} reworded and re-judged by a fresh checker."
+        lines.append(f"Facts: {f['verified_facts']} verified from {f['papers_in_fact_list']} papers. "
+                     f"Ref-check: {verdicts}.{extra}")
+    else:
+        lines.append(f"Facts: {f['verified_facts']} verified from {f['papers_in_fact_list']} papers. Ref-check: not run.")
+    if s.get("mode") == "study01":
+        lines.append(f"Removed: {f['removed_after_search_end']} after the search end date, "
+                     f"{f['removed_blocked']} on the block list. Run {s.get('run_id', '')}, code {s['code_sha256'][:8]}.")
+    return lines
 
 
 def cmd_export(a):
